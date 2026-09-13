@@ -1,0 +1,782 @@
+{
+  "pigeon_fixtures_version": 2,
+  "notes": [
+    "All byte strings are lowercase hex. All integers are decimal.",
+    "Packet types are provisional (Envelope spec §3).",
+    "Message IDs hash Version..Body with the SIGNED flag cleared; the Type byte is excluded (Envelope §4.3).",
+    "Signatures are ECDSA secp256r1 over SHA-256 of the same bytes, raw r||s, RFC 6979 deterministic nonces (Envelope §4.6). RCPT signing input is Version..Note with SIGNED cleared (§5.4).",
+    "expiry is null when it is not determined by the envelope alone (timestamp 0 or TTL 0xFFFF); tests must not check it then.",
+    "base_callsign is the mechanical normalization only; callers apply the rule that node callsigns are used whole."
+  ],
+  "packet_types": {
+    "MSG": 8,
+    "RCPT": 9,
+    "ROOM": 10
+  },
+  "flags": {
+    "SIGNED": 1,
+    "RCPT_REQ": 2
+  },
+  "rcpt_status": {
+    "QUEUED": 0,
+    "TRANSMITTED": 1,
+    "DELIVERED": 2,
+    "EXPIRED": 4,
+    "REJECTED": 5
+  },
+  "room_ops": {
+    "JOIN": 0,
+    "LEAVE": 1,
+    "LIST": 2,
+    "OK": 128,
+    "REFUSED": 129
+  },
+  "addresses": [
+    {
+      "text": "N1ADJ",
+      "value": 25858734,
+      "hex": "0000018a92ae",
+      "base_callsign": "N1ADJ",
+      "device_suffix": ""
+    },
+    {
+      "text": "N1ADJ  H",
+      "value": 1310745858734,
+      "hex": "01312e8a92ae",
+      "base_callsign": "N1ADJ",
+      "device_suffix": "  H"
+    },
+    {
+      "text": "N1ADJ  P",
+      "value": 2621465858734,
+      "hex": "02625b8a92ae",
+      "base_callsign": "N1ADJ",
+      "device_suffix": "  P"
+    },
+    {
+      "text": "N1ADJ-7",
+      "value": 143078658734,
+      "hex": "0021502712ae",
+      "base_callsign": "N1ADJ",
+      "device_suffix": "-7"
+    },
+    {
+      "text": "W1AW",
+      "value": 1474743,
+      "hex": "0000001680b7",
+      "base_callsign": "W1AW",
+      "device_suffix": ""
+    },
+    {
+      "text": "K1XYZ  R",
+      "value": 2949188199531,
+      "hex": "02aea950a46b",
+      "base_callsign": "K1XYZ",
+      "device_suffix": "  R"
+    },
+    {
+      "text": "VE3/N1ADJ",
+      "value": 66198361520222,
+      "hex": "3c3501d2b85e",
+      "base_callsign": "VE3/N1ADJ",
+      "device_suffix": ""
+    },
+    {
+      "text": "AB1CD",
+      "value": 10476881,
+      "hex": "0000009fdd51",
+      "base_callsign": "AB1CD",
+      "device_suffix": ""
+    },
+    {
+      "text": "A",
+      "value": 1,
+      "hex": "000000000001",
+      "base_callsign": "A",
+      "device_suffix": ""
+    },
+    {
+      "text": ".........",
+      "value": 262143999999999,
+      "hex": "ee6b27ffffff",
+      "base_callsign": ".........",
+      "device_suffix": ""
+    }
+  ],
+  "special_addresses": {
+    "reserved_zero": "000000000000",
+    "standard_max": "ee6b27ffffff",
+    "extended_base": "ee6b28000000",
+    "extended_end": "fffffffffffe",
+    "broadcast": "ffffffffffff",
+    "trailing_space_note": "ABC, 'ABC ' and 'ABC      ' all encode to 000000001311"
+  },
+  "rooms": {
+    "valid": [
+      {
+        "name": "MAINE",
+        "canonical": "MAINE",
+        "value": 262144013710453,
+        "hex": "ee6b28d13475",
+        "decodes_to": "MAINE"
+      },
+      {
+        "name": "M17DEV",
+        "canonical": "M17DEV",
+        "value": 262146265911533,
+        "hex": "ee6baf0f10ed",
+        "decodes_to": "M17DEV"
+      },
+      {
+        "name": "K1XYZ",
+        "canonical": "K1XYZ",
+        "value": 262144068199531,
+        "hex": "ee6b2c10a46b",
+        "decodes_to": "K1XYZ"
+      },
+      {
+        "name": "N1ADJ",
+        "canonical": "N1ADJ",
+        "value": 262144025858734,
+        "hex": "ee6b298a92ae",
+        "decodes_to": "N1ADJ"
+      },
+      {
+        "name": "ABCDEFGH",
+        "canonical": "ABCDEFGH",
+        "value": 263484019460881,
+        "hex": "efa327624b11",
+        "decodes_to": "ABCDEFGH"
+      },
+      {
+        "name": "A",
+        "canonical": "A",
+        "value": 262144000000001,
+        "hex": "ee6b28000001",
+        "decodes_to": "A"
+      },
+      {
+        "name": "R-1",
+        "canonical": "R-1",
+        "value": 262144000046298,
+        "hex": "ee6b2800b4da",
+        "decodes_to": "R-1"
+      },
+      {
+        "name": "maine",
+        "canonical": "MAINE",
+        "value": 262144013710453,
+        "hex": "ee6b28d13475",
+        "decodes_to": "MAINE",
+        "note": "case-insensitive; canonicalized to upper"
+      }
+    ],
+    "invalid_names": [
+      "",
+      "MAINELOBSTER",
+      "MAINE/1",
+      "MA.INE",
+      "MA INE"
+    ],
+    "invalid_addresses": [
+      {
+        "hex": "ee6b28000000",
+        "reason": "empty name (offset zero) is invalid",
+        "decodes_to": null
+      },
+      {
+        "hex": "f48829069069",
+        "reason": "decodes to 9 characters",
+        "decodes_to": null
+      },
+      {
+        "hex": "ee86c4b03475",
+        "reason": "contains /",
+        "decodes_to": null
+      },
+      {
+        "hex": "f46109000000",
+        "reason": "first address of the range reserved by Rooms §3.3",
+        "decodes_to": null
+      },
+      {
+        "hex": "fffffffffffe",
+        "reason": "last Extended address; reserved",
+        "decodes_to": null
+      },
+      {
+        "hex": "000000d13475",
+        "reason": "a Standard-range address is not a room",
+        "decodes_to": null
+      },
+      {
+        "hex": "ffffffffffff",
+        "reason": "broadcast",
+        "decodes_to": null
+      }
+    ],
+    "range": {
+      "first_valid": "ee6b28000001",
+      "last_valid": "f46108ffffff",
+      "first_reserved_by_rooms_spec": "f46109000000"
+    }
+  },
+  "test_key": {
+    "curve": "secp256r1",
+    "private_d": "1f2e3d4c5b6a79880f1e2d3c4b5a69784f5e6d7c8b9aa9b8c7d6e5f40312ab01",
+    "public_x": "36ca83240052b8357ca722e4d221a9406d10e2cf13faf3c42031307b2dcc51f4",
+    "public_y": "fdfe30874bcac06bf3f1e00478c941b503c944e53ac4a8b8d67640be5932348c",
+    "public_uncompressed": "0436ca83240052b8357ca722e4d221a9406d10e2cf13faf3c42031307b2dcc51f4fdfe30874bcac06bf3f1e00478c941b503c944e53ac4a8b8d67640be5932348c",
+    "public_spki_der": "3059301306072a8648ce3d020106082a8648ce3d0301070342000436ca83240052b8357ca722e4d221a9406d10e2cf13faf3c42031307b2dcc51f4fdfe30874bcac06bf3f1e00478c941b503c944e53ac4a8b8d67640be5932348c",
+    "note": "TEST KEY ONLY. Fixture signatures were produced with RFC 6979 deterministic nonces. Implementations must VERIFY them against this key; they are not expected to reproduce the bytes, and signers may use randomized or hedged nonces."
+  },
+  "envelopes": [
+    {
+      "name": "msg_basic",
+      "description": "Envelope spec §7 example: N1ADJ→W1AW, 24h TTL, delivery receipt requested, unsigned",
+      "type": "MSG",
+      "bytes": "0800020000018a92ae0000001680b76aa3ed4005a03c7f4869204a696d2c2074657374696e6720746865206e657720656e76656c6f70652e",
+      "length": 56,
+      "fields": {
+        "version": 0,
+        "flags": 2,
+        "source": "0000018a92ae",
+        "destination": "0000001680b7",
+        "timestamp": 1789128000,
+        "ttl_minutes": 1440,
+        "nonce": 15487,
+        "body": "Hi Jim, testing the new envelope."
+      },
+      "signing_input": "00020000018a92ae0000001680b76aa3ed4005a03c7f4869204a696d2c2074657374696e6720746865206e657720656e76656c6f70652e",
+      "message_id": "cba5c5c74eaebf72",
+      "expiry": 1789214400
+    },
+    {
+      "name": "msg_from_device",
+      "description": "Source carries a device suffix; base callsign is N1ADJ",
+      "type": "MSG",
+      "bytes": "08000001312e8a92ae0000001680b76aa3ed7c05a0000153656e742066726f6d20746865204854",
+      "length": 39,
+      "fields": {
+        "version": 0,
+        "flags": 0,
+        "source": "01312e8a92ae",
+        "destination": "0000001680b7",
+        "timestamp": 1789128060,
+        "ttl_minutes": 1440,
+        "nonce": 1,
+        "body": "Sent from the HT"
+      },
+      "signing_input": "000001312e8a92ae0000001680b76aa3ed7c05a0000153656e742066726f6d20746865204854",
+      "message_id": "a90618bd49187e47",
+      "expiry": 1789214460
+    },
+    {
+      "name": "msg_to_device",
+      "description": "Destination carries a device suffix: deliver only to N1ADJ's P device",
+      "type": "MSG",
+      "bytes": "0800000000001680b702625b8a92ae6aa3edb805a000024f6e6c7920666f72207468652070686f6e65",
+      "length": 41,
+      "fields": {
+        "version": 0,
+        "flags": 0,
+        "source": "0000001680b7",
+        "destination": "02625b8a92ae",
+        "timestamp": 1789128120,
+        "ttl_minutes": 1440,
+        "nonce": 2,
+        "body": "Only for the phone"
+      },
+      "signing_input": "00000000001680b702625b8a92ae6aa3edb805a000024f6e6c7920666f72207468652070686f6e65",
+      "message_id": "d1b85000aa781baf",
+      "expiry": 1789214520
+    },
+    {
+      "name": "msg_unknown_timestamp",
+      "description": "Clock-less radio: timestamp 0; expiry computed from receipt time (§4.4)",
+      "type": "MSG",
+      "bytes": "08000001312e8a92ae0000001680b70000000005a0beef4e6f205254432068657265",
+      "length": 34,
+      "fields": {
+        "version": 0,
+        "flags": 0,
+        "source": "01312e8a92ae",
+        "destination": "0000001680b7",
+        "timestamp": 0,
+        "ttl_minutes": 1440,
+        "nonce": 48879,
+        "body": "No RTC here"
+      },
+      "signing_input": "000001312e8a92ae0000001680b70000000005a0beef4e6f205254432068657265",
+      "message_id": "c4d040ea0c15daa5",
+      "expiry": null
+    },
+    {
+      "name": "msg_live_only",
+      "description": "TTL 0: must not be stored",
+      "type": "MSG",
+      "bytes": "0800000000018a92ae0000001680b76aa3edf40000000341726520796f752074686572653f",
+      "length": 37,
+      "fields": {
+        "version": 0,
+        "flags": 0,
+        "source": "0000018a92ae",
+        "destination": "0000001680b7",
+        "timestamp": 1789128180,
+        "ttl_minutes": 0,
+        "nonce": 3,
+        "body": "Are you there?"
+      },
+      "signing_input": "00000000018a92ae0000001680b76aa3edf40000000341726520796f752074686572653f",
+      "message_id": "2b988e331ad9e6da",
+      "expiry": 1789128180
+    },
+    {
+      "name": "msg_default_ttl",
+      "description": "TTL 0xFFFF: node applies its default (7 days)",
+      "type": "MSG",
+      "bytes": "0800000000018a92ae0000001680b76aa3ee30ffff00045768656e6576657220796f75206765742074686973",
+      "length": 44,
+      "fields": {
+        "version": 0,
+        "flags": 0,
+        "source": "0000018a92ae",
+        "destination": "0000001680b7",
+        "timestamp": 1789128240,
+        "ttl_minutes": 65535,
+        "nonce": 4,
+        "body": "Whenever you get this"
+      },
+      "signing_input": "00000000018a92ae0000001680b76aa3ee30ffff00045768656e6576657220796f75206765742074686973",
+      "message_id": "0e88bca5018fba08",
+      "expiry": null
+    },
+    {
+      "name": "msg_to_room",
+      "description": "Room destination; no receipts generated (§4.7)",
+      "type": "MSG",
+      "bytes": "0800020000018a92aeee6b28d134756aa3ee6c05a000054e657420746f6e69676874206174203720e28094203134362e353220e28692204d3137",
+      "length": 58,
+      "fields": {
+        "version": 0,
+        "flags": 2,
+        "source": "0000018a92ae",
+        "destination": "ee6b28d13475",
+        "timestamp": 1789128300,
+        "ttl_minutes": 1440,
+        "nonce": 5,
+        "body": "Net tonight at 7 — 146.52 → M17"
+      },
+      "signing_input": "00020000018a92aeee6b28d134756aa3ee6c05a000054e657420746f6e69676874206174203720e28094203134362e353220e28692204d3137",
+      "message_id": "6bcc6561d3d6984c",
+      "expiry": 1789214700,
+      "note": "RCPT_REQ set but ignored for rooms"
+    },
+    {
+      "name": "msg_empty_body",
+      "description": "Zero-length body is legal",
+      "type": "MSG",
+      "bytes": "0800000000018a92ae0000001680b76aa3eea8003c0006",
+      "length": 23,
+      "fields": {
+        "version": 0,
+        "flags": 0,
+        "source": "0000018a92ae",
+        "destination": "0000001680b7",
+        "timestamp": 1789128360,
+        "ttl_minutes": 60,
+        "nonce": 6,
+        "body": ""
+      },
+      "signing_input": "00000000018a92ae0000001680b76aa3eea8003c0006",
+      "message_id": "a3c2465140e347b9",
+      "expiry": 1789131960
+    },
+    {
+      "name": "msg_max_body_unsigned",
+      "description": "800-byte body: the maximum unsigned (§4.5)",
+      "type": "MSG",
+      "bytes": "0800000000018a92ae0000001680b76aa3eee405a000074142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f5051525354",
+      "length": 823,
+      "fields": {
+        "version": 0,
+        "flags": 0,
+        "source": "0000018a92ae",
+        "destination": "0000001680b7",
+        "timestamp": 1789128420,
+        "ttl_minutes": 1440,
+        "nonce": 7,
+        "body": "ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRST"
+      },
+      "signing_input": "00000000018a92ae0000001680b76aa3eee405a000074142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f505152535455565758595a4142434445464748494a4b4c4d4e4f5051525354",
+      "message_id": "2b288f084ebbcf96",
+      "expiry": 1789214820
+    },
+    {
+      "name": "msg_same_text_twice",
+      "description": "Same fields as msg_basic except nonce: different message ID",
+      "type": "MSG",
+      "bytes": "0800020000018a92ae0000001680b76aa3ed4005a03c804869204a696d2c2074657374696e6720746865206e657720656e76656c6f70652e",
+      "length": 56,
+      "fields": {
+        "version": 0,
+        "flags": 2,
+        "source": "0000018a92ae",
+        "destination": "0000001680b7",
+        "timestamp": 1789128000,
+        "ttl_minutes": 1440,
+        "nonce": 15488,
+        "body": "Hi Jim, testing the new envelope."
+      },
+      "signing_input": "00020000018a92ae0000001680b76aa3ed4005a03c804869204a696d2c2074657374696e6720746865206e657720656e76656c6f70652e",
+      "message_id": "c705c5cf70f514bf",
+      "expiry": 1789214400
+    },
+    {
+      "name": "msg_reserved_flags",
+      "description": "Reserved flag bits set: receivers must ignore them, and they ARE part of the hash",
+      "type": "MSG",
+      "bytes": "0800f00000018a92ae0000001680b76aa3ef2005a0000846757475726520666c616773",
+      "length": 35,
+      "fields": {
+        "version": 0,
+        "flags": 240,
+        "source": "0000018a92ae",
+        "destination": "0000001680b7",
+        "timestamp": 1789128480,
+        "ttl_minutes": 1440,
+        "nonce": 8,
+        "body": "Future flags"
+      },
+      "signing_input": "00f00000018a92ae0000001680b76aa3ef2005a0000846757475726520666c616773",
+      "message_id": "48061a51ef7770b5",
+      "expiry": 1789214880
+    },
+    {
+      "name": "msg_signed",
+      "description": "SIGNED|RCPT_REQ. Signature over signing_input; message ID identical whether or not signed",
+      "type": "MSG",
+      "bytes": "0800030000018a92ae0000001680b76aa3ef5c05a051515369676e65642068656c6c6f6cb9b1d69a3758246f4b26881f1157b7bc80e75545c499c41c6d58217e7e4b22269c88409923f04213f72ac7c648ff3b7471186639c754eda5a3902e6b8260aa",
+      "length": 99,
+      "fields": {
+        "version": 0,
+        "flags": 3,
+        "source": "0000018a92ae",
+        "destination": "0000001680b7",
+        "timestamp": 1789128540,
+        "ttl_minutes": 1440,
+        "nonce": 20817,
+        "body": "Signed hello"
+      },
+      "signing_input": "00020000018a92ae0000001680b76aa3ef5c05a051515369676e65642068656c6c6f",
+      "message_id": "c9dfde727754081f",
+      "expiry": 1789214940,
+      "signature": "6cb9b1d69a3758246f4b26881f1157b7bc80e75545c499c41c6d58217e7e4b22269c88409923f04213f72ac7c648ff3b7471186639c754eda5a3902e6b8260aa",
+      "digest": "c9dfde727754081f279fa3c9ba74fed64ddbe2bf05f2968b6207468c139b824d"
+    },
+    {
+      "name": "msg_signed_stripped",
+      "description": "msg_signed with the signature removed by a node: same message ID",
+      "type": "MSG",
+      "bytes": "0800020000018a92ae0000001680b76aa3ef5c05a051515369676e65642068656c6c6f",
+      "length": 35,
+      "fields": {
+        "version": 0,
+        "flags": 2,
+        "source": "0000018a92ae",
+        "destination": "0000001680b7",
+        "timestamp": 1789128540,
+        "ttl_minutes": 1440,
+        "nonce": 20817,
+        "body": "Signed hello"
+      },
+      "signing_input": "00020000018a92ae0000001680b76aa3ef5c05a051515369676e65642068656c6c6f",
+      "message_id": "c9dfde727754081f",
+      "expiry": 1789214940
+    },
+    {
+      "name": "rcpt_queued",
+      "description": "Node K1XYZ R accepted msg_basic for store-and-forward",
+      "type": "RCPT",
+      "bytes": "09000002aea950a46b0000018a92aecba5c5c74eaebf72006aa3ed4100000000",
+      "length": 32,
+      "fields": {
+        "version": 0,
+        "flags": 0,
+        "source": "02aea950a46b",
+        "destination": "0000018a92ae",
+        "message_id": "cba5c5c74eaebf72",
+        "status": 0,
+        "timestamp": 1789128001,
+        "last_heard": 0,
+        "note": ""
+      }
+    },
+    {
+      "name": "rcpt_transmitted",
+      "description": "Node transmitted toward W1AW; W1AW last heard 20 minutes earlier",
+      "type": "RCPT",
+      "bytes": "09000002aea950a46b0000018a92aecba5c5c74eaebf72016aa3ed5e6aa3e890",
+      "length": 32,
+      "fields": {
+        "version": 0,
+        "flags": 0,
+        "source": "02aea950a46b",
+        "destination": "0000018a92ae",
+        "message_id": "cba5c5c74eaebf72",
+        "status": 1,
+        "timestamp": 1789128030,
+        "last_heard": 1789126800,
+        "note": ""
+      }
+    },
+    {
+      "name": "rcpt_delivered",
+      "description": "W1AW's client received msg_basic (client-issued, no last_heard)",
+      "type": "RCPT",
+      "bytes": "0900000000001680b70000018a92aecba5c5c74eaebf72026aa3ed6d00000000",
+      "length": 32,
+      "fields": {
+        "version": 0,
+        "flags": 0,
+        "source": "0000001680b7",
+        "destination": "0000018a92ae",
+        "message_id": "cba5c5c74eaebf72",
+        "status": 2,
+        "timestamp": 1789128045,
+        "last_heard": 0,
+        "note": ""
+      }
+    },
+    {
+      "name": "rcpt_expired",
+      "description": "Expired; W1AW never heard",
+      "type": "RCPT",
+      "bytes": "09000002aea950a46b0000018a92aecba5c5c74eaebf72046aa53ec000000000",
+      "length": 32,
+      "fields": {
+        "version": 0,
+        "flags": 0,
+        "source": "02aea950a46b",
+        "destination": "0000018a92ae",
+        "message_id": "cba5c5c74eaebf72",
+        "status": 4,
+        "timestamp": 1789214400,
+        "last_heard": 0,
+        "note": ""
+      }
+    },
+    {
+      "name": "rcpt_rejected",
+      "description": "Rejected with a note",
+      "type": "RCPT",
+      "bytes": "09000002aea950a46b0000018a92aecba5c5c74eaebf72056aa3ed420000000063616c6c7369676e20626c6f636b6564",
+      "length": 48,
+      "fields": {
+        "version": 0,
+        "flags": 0,
+        "source": "02aea950a46b",
+        "destination": "0000018a92ae",
+        "message_id": "cba5c5c74eaebf72",
+        "status": 5,
+        "timestamp": 1789128002,
+        "last_heard": 0,
+        "note": "callsign blocked"
+      }
+    },
+    {
+      "name": "rcpt_delivered_signed",
+      "description": "DELIVERED with SIGNED; signing input is Version..Note with SIGNED cleared",
+      "type": "RCPT",
+      "bytes": "0900010000001680b70000018a92aecba5c5c74eaebf72026aa3ed6e00000000c7b5d86f266b947edc99a23cebe8ef17d9ce8ec9779c30f4df5d0e73898fcfa3c163d922bb7668394bc6ff8a5a82448ea46d1a07d91e1130b3f6cebccd81c0eb",
+      "length": 96,
+      "fields": {
+        "version": 0,
+        "flags": 1,
+        "source": "0000001680b7",
+        "destination": "0000018a92ae",
+        "message_id": "cba5c5c74eaebf72",
+        "status": 2,
+        "timestamp": 1789128046,
+        "last_heard": 0,
+        "note": ""
+      },
+      "signing_input": "00000000001680b70000018a92aecba5c5c74eaebf72026aa3ed6e00000000",
+      "signature": "c7b5d86f266b947edc99a23cebe8ef17d9ce8ec9779c30f4df5d0e73898fcfa3c163d922bb7668394bc6ff8a5a82448ea46d1a07d91e1130b3f6cebccd81c0eb",
+      "digest": "9e96ebdbcafe573b366c653875c0c18a598fed65ec999511ac5019fca5004224"
+    }
+  ],
+  "room_packets": [
+    {
+      "name": "room_join",
+      "description": "JOIN MAINE and M17DEV",
+      "type": "ROOM",
+      "bytes": "0a0000006aa3ef9802ee6b28d13475ee6baf0f10ed",
+      "length": 21,
+      "fields": {
+        "version": 0,
+        "flags": 0,
+        "op": 0,
+        "timestamp": 1789128600,
+        "count": 2,
+        "rooms": [
+          "ee6b28d13475",
+          "ee6baf0f10ed"
+        ],
+        "note": ""
+      }
+    },
+    {
+      "name": "room_join_no_clock",
+      "description": "JOIN with timestamp 0; node substitutes receipt time before storing",
+      "type": "ROOM",
+      "bytes": "0a0000000000000001ee6b28d13475",
+      "length": 15,
+      "fields": {
+        "version": 0,
+        "flags": 0,
+        "op": 0,
+        "timestamp": 0,
+        "count": 1,
+        "rooms": [
+          "ee6b28d13475"
+        ],
+        "note": ""
+      }
+    },
+    {
+      "name": "room_leave",
+      "description": "LEAVE MAINE",
+      "type": "ROOM",
+      "bytes": "0a0000016aa3efd401ee6b28d13475",
+      "length": 15,
+      "fields": {
+        "version": 0,
+        "flags": 0,
+        "op": 1,
+        "timestamp": 1789128660,
+        "count": 1,
+        "rooms": [
+          "ee6b28d13475"
+        ],
+        "note": ""
+      }
+    },
+    {
+      "name": "room_list",
+      "description": "LIST request: no rooms",
+      "type": "ROOM",
+      "bytes": "0a0000026aa3f01000",
+      "length": 9,
+      "fields": {
+        "version": 0,
+        "flags": 0,
+        "op": 2,
+        "timestamp": 1789128720,
+        "count": 0,
+        "rooms": [],
+        "note": ""
+      }
+    },
+    {
+      "name": "room_ok_empty",
+      "description": "OK reply to JOIN/LEAVE",
+      "type": "ROOM",
+      "bytes": "0a0000806aa3ef9900",
+      "length": 9,
+      "fields": {
+        "version": 0,
+        "flags": 0,
+        "op": 128,
+        "timestamp": 1789128601,
+        "count": 0,
+        "rooms": [],
+        "note": ""
+      }
+    },
+    {
+      "name": "room_ok_list",
+      "description": "OK reply to LIST: current subscriptions",
+      "type": "ROOM",
+      "bytes": "0a0000806aa3f01102ee6b28d13475ee6b2c10a46b",
+      "length": 21,
+      "fields": {
+        "version": 0,
+        "flags": 0,
+        "op": 128,
+        "timestamp": 1789128721,
+        "count": 2,
+        "rooms": [
+          "ee6b28d13475",
+          "ee6b2c10a46b"
+        ],
+        "note": ""
+      }
+    },
+    {
+      "name": "room_refused",
+      "description": "REFUSED with note; the refused room is listed",
+      "type": "ROOM",
+      "bytes": "0a0000816aa3ef9a01ee77ebbd1d2a726f6f6d206e6f742063617272696564",
+      "length": 31,
+      "fields": {
+        "version": 0,
+        "flags": 0,
+        "op": 129,
+        "timestamp": 1789128602,
+        "count": 1,
+        "rooms": [
+          "ee77ebbd1d2a"
+        ],
+        "note": "room not carried"
+      }
+    }
+  ],
+  "sms_wrap": {
+    "description": "Legacy SMS from LSF src 'N1ADJ  H' to dst 'W1AW' received at node time T0+900; node default TTL 7 days; nonce chosen as shown",
+    "sms_packet": "05202048656c6c6f2066726f6d2061206c656761637920726164696f202000",
+    "lsf_source": "01312e8a92ae",
+    "lsf_destination": "0000001680b7",
+    "node_time": 1789128900,
+    "node_default_ttl_minutes": 10080,
+    "nonce": 31354,
+    "envelope": "08000001312e8a92ae0000001680b76aa3f0c427607a7a48656c6c6f2066726f6d2061206c656761637920726164696f",
+    "message_id": "20a77682dc1ef035",
+    "unwrap": {
+      "description": "Egress of msg_basic to a legacy client: SMS type byte, body, NUL",
+      "sms_packet": "054869204a696d2c2074657374696e6720746865206e657720656e76656c6f70652e00"
+    }
+  },
+  "invalid_envelopes": [
+    {
+      "name": "truncated_header",
+      "bytes": "0800020000018a92ae0000001680b76aa3ed4005",
+      "reason": "shorter than the 23-byte MSG header"
+    },
+    {
+      "name": "signed_flag_too_short",
+      "bytes": "0800010000018a92ae0000001680b76aa3ed40003c000173686f7274",
+      "reason": "SIGNED set but payload shorter than header + 64"
+    },
+    {
+      "name": "unknown_version",
+      "bytes": "0801000000018a92ae0000001680b76aa3ed40003c00017631",
+      "reason": "version 1 is not defined; must be rejected (or handled by a future parser)"
+    },
+    {
+      "name": "body_too_long",
+      "bytes": "0800000000018a92ae0000001680b76aa3ed40003c0001414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141",
+      "reason": "801-byte body exceeds the 823-byte packet"
+    },
+    {
+      "name": "rcpt_truncated",
+      "bytes": "09000002aea950a46b0000018a92aecba5c5c74eaebf72006aa3ed400000",
+      "reason": "shorter than the 32-byte RCPT header"
+    },
+    {
+      "name": "room_count_mismatch",
+      "bytes": "0a0000006aa3ed4002ee6b28d13475",
+      "reason": "count says 2 rooms, only one present"
+    }
+  ]
+}
