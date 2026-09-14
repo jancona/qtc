@@ -345,6 +345,7 @@ func TestFixturesEnvelopes(t *testing.T) {
 			}
 			checkSignature(t, e, f, priv)
 			checkJSON(t, e, raw)
+			checkStoreID(t, e, raw)
 			if s := e.String(); !strings.HasPrefix(s, f.Type+" ") {
 				t.Errorf("String = %q", s)
 			}
@@ -578,6 +579,25 @@ func checkJSON(t *testing.T, e *envelope.Envelope, raw []byte) {
 	}
 }
 
+// checkStoreID: a MSG is stored under its message ID; RCPT and ROOM under a
+// hash of their bytes, so receipts for one message do not collide.
+func checkStoreID(t *testing.T, e *envelope.Envelope, raw []byte) {
+	t.Helper()
+	if e.Type() == envelope.TypeMSG {
+		if e.StoreID() != e.ID() {
+			t.Errorf("StoreID %s != ID %s", e.StoreID(), e.ID())
+		}
+		return
+	}
+	sum := sha256.Sum256(raw)
+	if e.StoreID() != envelope.IDFromBytes(sum[:8]) {
+		t.Errorf("StoreID = %s, want SHA-256(bytes)[:8]", e.StoreID())
+	}
+	if e.StoreID() == (envelope.ID{}) {
+		t.Error("StoreID is zero")
+	}
+}
+
 func TestFixturesRoomPackets(t *testing.T) {
 	fx := loadFixtures(t)
 	for _, f := range fx.RoomPackets {
@@ -627,6 +647,7 @@ func TestFixturesRoomPackets(t *testing.T) {
 				t.Errorf("BuildRoom bytes differ:\n got %x\nwant %x", built.Bytes(), raw)
 			}
 			checkJSON(t, e, raw)
+			checkStoreID(t, e, raw)
 			if s := e.String(); !strings.HasPrefix(s, "ROOM "+r.Op().String()) {
 				t.Errorf("String = %q", s)
 			}

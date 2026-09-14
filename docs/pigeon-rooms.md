@@ -37,7 +37,7 @@ As in the Message Envelope specification, and see Terminology above. "Callsign" 
 
 A room name is 1 to 8 characters from the set `A`–`Z`, `0`–`9`, and `-`. Names are case-insensitive and canonicalized to upper case. `/` and `.` are valid base-40 characters but are excluded from room names to keep them typeable on constrained radio UIs and to leave room for future syntax.
 
-Clients may display or accept a `#` prefix as a visual convention. The prefix is never part of the name or the encoding; a radio that presents rooms by menu selection never shows it.
+Clients may display a `#` prefix as a visual convention. The prefix is never part of the name or the encoding and is not accepted as input: `#` is not an M17 character, and a name containing it is an error. A radio that presents rooms by menu selection never shows it.
 
 ### 3.2 Encoding
 
@@ -57,7 +57,7 @@ Addresses from `0xF46109000000` through `0xFFFFFFFFFFFE` (the rest of the Extend
 
 ### 3.4 Node-Callsign Rooms
 
-A room whose name equals a node's callsign is that node's **local room**: "everyone currently using this node." It is an ordinary room in every respect except that the node auto-subscribes callsigns it hears (§4.4). It replaces the `@ALL` broadcast of legacy SMS clients, which is not supported for MSG.
+A room whose name is a node's callsign with its module suffix removed (the base-callsign rule of Architecture §3, applied here and only here to a node callsign; `K1XYZ  R` has local room `K1XYZ`) is that node's **local room**: "everyone currently using this node." It is an ordinary room in every respect except that the node auto-subscribes callsigns it hears (§4.4). It replaces the `@ALL` broadcast of legacy SMS clients, which is not supported for MSG.
 
 ## 4. Subscriptions
 
@@ -71,7 +71,7 @@ Opt-outs (§4.3) are likewise derived from the latest ROOM envelope per room, so
 
 A callsign becomes subscribed to a room by any of:
 
-- **Implicit join:** sending a MSG (or legacy SMS) whose Destination is the room. This is the primary path for radio users. It also clears any opt-out for that room.
+- **Implicit join:** sending a MSG (or legacy SMS) whose Destination is the room. This is the primary path for radio users. It also clears any opt-out for that room. The node that processes the send synthesizes a ROOM JOIN for the room with the MSG's timestamp (or its receipt time if that is `0`) and stores it like an explicit join, so subscription state is derived from ROOM envelopes only.
 - **Explicit join:** a ROOM control packet (§5) with op JOIN, or the legacy `/join` command (§6).
 - **Auto-subscription** to a node-callsign room (§4.4).
 
@@ -85,7 +85,7 @@ The opt-out prevents auto-subscription from re-adding the callsign. It is cleare
 
 ### 4.4 Auto-Subscription
 
-When a node hears a callsign on its RF side or from a directly connected client, it subscribes that callsign to its own node-callsign room unless an opt-out exists. Nodes must not auto-subscribe callsigns to any other room.
+When a node hears a callsign on its RF side or from a directly connected client, it subscribes that callsign to its own node-callsign room unless an opt-out exists. Nodes must not auto-subscribe callsigns to any other room. Auto-subscriptions are node-local and are never stored in the inbox; only an explicit or implicit join to the local room is.
 
 ### 4.5 Expiry
 
@@ -95,7 +95,7 @@ A room with no live subscriptions anywhere has no state anywhere and needs no cl
 
 ### 4.6 Multiple Home Nodes
 
-A callsign heard at several nodes has its subscriptions applied at each, all derived from the same inbox contents. The latest ROOM envelope per room wins; a LEAVE is a ROOM envelope like any other, so every node homing the callsign sees it after its next sweep and records the opt-out.
+A callsign heard at several nodes has its subscriptions applied at each, all derived from the same inbox contents. The latest ROOM envelope per room wins, and on equal timestamps LEAVE wins, since the sticky opt-out is the conservative outcome and clock-less radios receive node-substituted times; a LEAVE is a ROOM envelope like any other, so every node homing the callsign sees it after its next sweep and records the opt-out.
 
 ## 5. ROOM — Control Packet
 
@@ -116,7 +116,7 @@ Clients that speak the new protocol manage subscriptions with a dedicated packet
 
 The layout is the same for requests and replies. Requests never carry a note.
 
-The timestamp is what orders subscription state when a callsign's JOIN and LEAVE requests are stored in its inbox (Node Protocol §9): the latest per room wins. ROOM packets are not content-addressed, and no signature is defined for them in this version, so a node storing a request whose timestamp is `0` substitutes its own receipt time before storing it. The Flags byte exists so that a later version can sign stored JOIN/LEAVE records without changing the layout; once signatures exist, timestamp substitution will not be possible for signed requests and they will need a clock.
+The timestamp is what orders subscription state when a callsign's JOIN and LEAVE requests are stored in its inbox (Node Protocol §9): the latest per room wins. ROOM packets are not content-addressed, and no signature is defined for them in this version, so a node storing a request whose timestamp is `0` substitutes its own receipt time before storing it (rebuilding the packet from its fields; this is the one place a node produces a modified copy of what it received). The Flags byte exists so that a later version can sign stored JOIN/LEAVE records without changing the layout; once signatures exist, timestamp substitution will not be possible for signed requests and they will need a clock.
 
 ### 5.2 Ops
 
@@ -153,7 +153,7 @@ Clients that speak only SMS interact with rooms as follows.
 | `/leave NAME [NAME…]` | As ROOM LEAVE |
 | `/rooms` | As ROOM LIST |
 
-Names are matched case-insensitively and an optional leading `#` is ignored. The node replies with an SMS from its own callsign containing a short status line. Unrecognized commands get a one-line error. Commands are only honored from the RF side or from directly connected clients, never from forwarded traffic.
+Names are matched case-insensitively. A name containing `#` (or any other character outside §3.1) is an error. The node replies with an SMS from its own callsign containing a short status line. Unrecognized commands get a one-line error. Commands are only honored from the RF side or from directly connected clients, never from forwarded traffic.
 
 Since the node's callsign is also its local room name, an SMS to the node callsign that does *not* begin with `/` is a message to the local room, not a command.
 
@@ -189,7 +189,10 @@ No receipts are generated for room messages except REJECTED, per the Message Env
 
 - **Subscription state** is stored as ROOM envelopes in the callsign's inbox and applied by every node that homes it; room fan-out is a gossipsub topic per room.
 - **Rooms are subscription-only,** with no ownership or explicit lifecycle.
-- **Implicit join on send.** Sending to a room subscribes the sender.
+- **Implicit join on send.** Sending to a room subscribes the sender; the node stores a synthesized ROOM JOIN so state stays ROOM-only.
+- **Ordering.** Latest ROOM envelope per room wins; LEAVE wins ties.
+- **Local room name** is the node callsign with its module suffix removed.
+- **Auto-subscriptions** are node-local, never stored.
 - **Explicit leave is sticky** via a recorded opt-out, cleared only by rejoining or sending.
 - **Node-callsign rooms** with auto-subscription replace `@ALL`.
-- **Room names** are 1–8 characters from `A–Z`, `0–9`, `-`, encoded as a base-40 offset into the Extended range; `#` is a display convention only.
+- **Room names** are 1–8 characters from `A–Z`, `0–9`, `-`, encoded as a base-40 offset into the Extended range; `#` is a display convention only and is never accepted as input.

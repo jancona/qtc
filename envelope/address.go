@@ -134,8 +134,7 @@ func SplitCallsign(text string) (base, suffix string) {
 }
 
 // RoomAddress encodes a room name (rooms spec §3.1–3.2): one to eight
-// characters of A–Z, 0–9, and '-', case-insensitive. A leading '#' is not
-// accepted; it is a display convention, not part of the name.
+// characters of A–Z, 0–9, and '-', case-insensitive.
 func RoomAddress(name string) (Address, error) {
 	name = strings.ToUpper(name)
 	if err := checkRoomName(name); err != nil {

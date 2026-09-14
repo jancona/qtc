@@ -99,13 +99,13 @@ Stream protocol ID: `/pigeon/0/store`. Opened by any node to a node advertising 
 | PUT | → inbox | `callsign` address (base), `env` env | Store an envelope under a base callsign |
 | PUT_OK | ← inbox | `id` msgid | Stored (or already present) |
 | PUT_ERR | ← inbox | `id` msgid, `code` integer, `reason` string | 1 refused, 2 quota, 3 expired, 4 invalid |
-| QUERY | → inbox | `callsign` address, `since` timestamp, `limit` integer, `types` array of integer (envelope types; default MSG and RCPT) | Fetch envelopes stored since `since`, by received-at time |
+| QUERY | → inbox | `callsign` address, `since` timestamp, `limit` integer, `types` array of integer (envelope types; default MSG and RCPT, so a sweep that wants subscription state must ask for ROOM) | Fetch envelopes stored since `since`, by received-at time |
 | RESULT | ← inbox | `envs` array of env, `next` timestamp or null | `next` non-null means more exist; query again from it |
 | WATCH | → inbox | `callsigns` array of address | Push new puts for these callsigns on this stream until it closes |
 | EVENT | ← inbox | `callsign` address, `env` env | A newly stored envelope for a watched callsign |
 | UNWATCH | → inbox | `callsigns` array of address | |
 
-Inbox nodes store an envelope until its expiry (Message Envelope §4.4), computed from the envelope timestamp or, if unknown, the time of the first PUT. Storage is keyed by base callsign and message ID; a PUT of an existing ID is PUT_OK and a no-op. Inbox nodes never contact each other.
+Inbox nodes store an envelope until its expiry (Message Envelope §4.4), computed from the envelope timestamp or, if unknown, the time of the first PUT. Storage is keyed by base callsign and message ID; a PUT of an existing ID is PUT_OK and a no-op. RCPT and ROOM envelopes have no message ID of their own (a receipt's Message ID field names the original message, and several receipts for one message must coexist; Rooms §5.3); for storage and PUT_OK their ID is the first 8 bytes of SHA-256 over the envelope bytes as stored, i.e. for ROOM after any timestamp substitution. Inbox nodes never contact each other.
 
 An inbox node accepts PUT for any callsign, subject to per-writer and per-callsign quotas (unspecified; see Open Questions).
 
