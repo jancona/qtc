@@ -26,7 +26,7 @@ All Pigeon payloads (pubsub messages, DHT records, and store-protocol messages) 
 
 | Type | JSON representation |
 |---|---|
-| address | string: the canonical text form of an M17 address, up to 9 characters (`"N1ADJ  H"`, `"N1ADJ"`) |
+| address | string: the canonical text form of an M17 address, up to 9 characters (`"N1ADJ  H"`, `"N1ADJ"`), or `#` followed by the canonical room name for a room address (`"#MAINE"`). The `#` here is the protocol's text form for the Extended range and is unrelated to the rule that users never type `#` in room names (Rooms §3.1). |
 | nodeid | string: the libp2p peer ID in its standard text encoding |
 | msgid | string: 16 lowercase hex characters (the 8-byte message ID) |
 | env | string: base64 (standard, padded) of the envelope bytes, unmodified |
@@ -98,14 +98,18 @@ Stream protocol ID: `/pigeon/0/store`. Opened by any node to a node advertising 
 |---|---|---|---|
 | PUT | → inbox | `callsign` address (base), `env` env | Store an envelope under a base callsign |
 | PUT_OK | ← inbox | `id` msgid | Stored (or already present) |
-| PUT_ERR | ← inbox | `id` msgid, `code` integer, `reason` string | 1 refused, 2 quota, 3 expired, 4 invalid |
-| QUERY | → inbox | `callsign` address, `since` timestamp, `limit` integer, `types` array of integer (envelope types; default MSG and RCPT, so a sweep that wants subscription state must ask for ROOM) | Fetch envelopes stored since `since`, by received-at time |
-| RESULT | ← inbox | `envs` array of env, `next` timestamp or null | `next` non-null means more exist; query again from it |
+| PUT_ERR | ← inbox | `id` msgid, `code` integer, `reason` string | 1 refused (including a live-only MSG with TTL 0, which must not be stored), 2 quota, 3 expired, 4 invalid |
+| QUERY | → inbox | `callsign` address, `since` timestamp (inclusive), `limit` integer (default 100, maximum 1000; the inbox clamps), `types` array of integer (envelope types; default MSG and RCPT, so a sweep that wants subscription state must ask for ROOM) | Fetch envelopes stored since `since`, by received-at time |
+| RESULT | ← inbox | `envs` array of env, `next` timestamp or null | `next` non-null means more exist; query again from it. `next` is the received-at time of the last envelope returned, and a RESULT always includes every envelope sharing that second, so a page may exceed `limit` slightly and pages may overlap; callers union by ID |
 | WATCH | → inbox | `callsigns` array of address | Push new puts for these callsigns on this stream until it closes |
 | EVENT | ← inbox | `callsign` address, `env` env | A newly stored envelope for a watched callsign |
 | UNWATCH | → inbox | `callsigns` array of address | |
 
 Inbox nodes store an envelope until its expiry (Message Envelope §4.4), computed from the envelope timestamp or, if unknown, the time of the first PUT. Storage is keyed by base callsign and message ID; a PUT of an existing ID is PUT_OK and a no-op. RCPT and ROOM envelopes have no message ID of their own (a receipt's Message ID field names the original message, and several receipts for one message must coexist; Rooms §5.3); for storage and PUT_OK their ID is the first 8 bytes of SHA-256 over the envelope bytes as stored, i.e. for ROOM after any timestamp substitution. Inbox nodes never contact each other.
+
+Replies are sent in request order on the stream; EVENT messages may appear between any two messages. A client should keep one request in flight per stream. A message with an unknown `type` is ignored and logged, so types can be added without breaking older inboxes.
+
+Retention: a MSG is kept until its expiry as above. RCPT and ROOM envelopes carry no TTL; a RCPT is kept for the node's default TTL from the time of the first PUT, and a ROOM envelope for the subscription expiry (Rooms §4.5, default 30 days) from the time of the first PUT.
 
 An inbox node accepts PUT for any callsign, subject to per-writer and per-callsign quotas (unspecified; see Open Questions).
 

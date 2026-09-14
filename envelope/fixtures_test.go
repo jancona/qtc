@@ -224,6 +224,9 @@ func TestFixturesAddresses(t *testing.T) {
 			if a.String() != f.Text {
 				t.Errorf("String = %q, want %q", a.String(), f.Text)
 			}
+			if p, err := envelope.ParseAddress(a.String()); err != nil || p != a {
+				t.Errorf("ParseAddress(String) = %d, %v", uint64(p), err)
+			}
 			// base_callsign is the mechanical rule only. K1XYZ  R is a node
 			// callsign that callers must use whole; that policy is theirs,
 			// not this package's (fixtures note, architecture §3).
@@ -233,6 +236,9 @@ func TestFixturesAddresses(t *testing.T) {
 			}
 			if a.BaseCallsign() != f.BaseCallsign {
 				t.Errorf("BaseCallsign = %q, want %q", a.BaseCallsign(), f.BaseCallsign)
+			}
+			if bt, err := a.Base().Text(); err != nil || bt != f.BaseCallsign {
+				t.Errorf("Base().Text() = %q, %v; want %q", bt, err, f.BaseCallsign)
 			}
 			if !a.IsStandard() || a.IsRoom() || a.IsExtended() {
 				t.Errorf("range predicates wrong for a callsign")
@@ -258,6 +264,12 @@ func TestFixturesAddresses(t *testing.T) {
 		}
 		if envelope.Broadcast.String() != "@ALL" {
 			t.Errorf("Broadcast.String = %q", envelope.Broadcast.String())
+		}
+		if p, err := envelope.ParseAddress("@ALL"); err != nil || p != envelope.Broadcast {
+			t.Errorf("ParseAddress(@ALL) = %d, %v", uint64(p), err)
+		}
+		if _, err := envelope.ParseAddress("#"); err == nil {
+			t.Error("ParseAddress accepted an empty room name")
 		}
 		// trailing_space_note: padding spaces do not change the value.
 		abc, _ := envelope.EncodeAddress("ABC")
@@ -292,6 +304,12 @@ func TestFixturesRooms(t *testing.T) {
 			}
 			if a.String() != "#"+f.Canonical {
 				t.Errorf("String = %q", a.String())
+			}
+			if a.Base() != a {
+				t.Error("Base changed a room address")
+			}
+			if p, err := envelope.ParseAddress(a.String()); err != nil || p != a {
+				t.Errorf("ParseAddress(String) = %d, %v", uint64(p), err)
 			}
 		})
 	}

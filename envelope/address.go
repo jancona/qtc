@@ -191,3 +191,32 @@ func (a Address) String() string {
 	}
 	return fmt.Sprintf("0x%012X", uint64(a))
 }
+
+// ParseAddress inverts String: callsign text, "#NAME" for a room, or "@ALL"
+// for broadcast. It is the protocol's text form for JSON fields (node
+// protocol §1.1); user-typed room names go through RoomAddress, which does
+// not accept '#'.
+func ParseAddress(text string) (Address, error) {
+	switch {
+	case text == "@ALL":
+		return Broadcast, nil
+	case strings.HasPrefix(text, "#"):
+		return RoomAddress(text[1:])
+	default:
+		return EncodeAddress(text)
+	}
+}
+
+// Base returns the base-callsign address for a callsign (the device suffix
+// removed), which is the key for all messaging state. Other addresses,
+// rooms included, are returned unchanged.
+func (a Address) Base() Address {
+	if !a.IsStandard() {
+		return a
+	}
+	b, err := EncodeAddress(a.BaseCallsign())
+	if err != nil {
+		return a
+	}
+	return b
+}
