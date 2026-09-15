@@ -33,6 +33,7 @@ type fileConfig struct {
 	Rooms            []string `json:"rooms"`
 	Devices          []string `json:"devices"`
 	MetricsInterval  string   `json:"metrics_interval"` // Go duration, e.g. "60s"; "" disables
+	Admin            string   `json:"admin"`            // loopback host:port for the admin HTTP interface; "" disables
 	PresenceInterval string   `json:"presence_interval"`
 	SweepInterval    string   `json:"sweep_interval"`
 }
@@ -41,6 +42,7 @@ func main() {
 	var (
 		path     = flag.String("config", "roost.json", "config file")
 		logLevel = flag.String("log-level", "info", "debug, info, warn, or error")
+		printID  = flag.Bool("print-id", false, "load or create the node key, print the peer ID, and exit")
 	)
 	flag.Parse()
 
@@ -64,6 +66,15 @@ func main() {
 		log.Error("new roost", "err", err)
 		os.Exit(1)
 	}
+	if *printID {
+		id, err := r.PeerID()
+		if err != nil {
+			log.Error("peer id", "err", err)
+			os.Exit(1)
+		}
+		fmt.Println(id)
+		return
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	if err := r.Start(ctx); err != nil {
@@ -73,12 +84,21 @@ func main() {
 	for _, a := range r.AddrInfo().Addrs {
 		fmt.Printf("%s/p2p/%s\n", a, r.ID())
 	}
+	if adminAddr != "" {
+		if _, err := r.ServeAdmin(adminAddr); err != nil {
+			log.Error("admin", "err", err)
+			os.Exit(1)
+		}
+	}
 	<-ctx.Done()
 	log.Info("shutting down")
 	if err := r.Stop(); err != nil {
 		log.Warn("stop", "err", err)
 	}
 }
+
+// adminAddr is set by loadConfig.
+var adminAddr string
 
 func loadConfig(path string) (roost.Config, error) {
 	b, err := os.ReadFile(path)
@@ -89,6 +109,7 @@ func loadConfig(path string) (roost.Config, error) {
 	if err := json.Unmarshal(b, &fc); err != nil {
 		return roost.Config{}, fmt.Errorf("%s: %w", path, err)
 	}
+	adminAddr = fc.Admin
 	cfg := roost.Config{
 		Callsign:     fc.Callsign,
 		KeyFile:      fc.KeyFile,

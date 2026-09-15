@@ -57,14 +57,30 @@ func (r *Roost) Homed() []envelope.Address {
 // home runs the homing loop for one base callsign: watch, sweep, and
 // resweep at the configured interval while the roost runs.
 func (r *Roost) home(h *homed) {
-	for _, id := range r.inbox.membersFor(h.base) {
-		ctx, cancel := context.WithTimeout(r.ctx, 30*time.Second)
-		if err := r.inbox.conn(id).watch(ctx, h.base); err != nil {
-			r.log.Warn("watch failed; sweep will retry the connection", "member", id, "callsign", h.base, "err", err)
+	// Until a first watch and sweep succeed (the inbox node may not be
+	// reachable yet), retry every 30 seconds rather than at the sweep
+	// interval.
+	for {
+		watched := 0
+		for _, id := range r.inbox.membersFor(h.base) {
+			ctx, cancel := context.WithTimeout(r.ctx, 30*time.Second)
+			err := r.inbox.conn(id).watch(ctx, h.base)
+			cancel()
+			if err != nil {
+				r.log.Warn("watch failed", "member", id, "callsign", h.base, "err", err)
+				continue
+			}
+			watched++
 		}
-		cancel()
+		if watched > 0 && r.sweep(h) {
+			break
+		}
+		select {
+		case <-r.ctx.Done():
+			return
+		case <-time.After(30 * time.Second):
+		}
 	}
-	r.sweep(h)
 	t := time.NewTicker(r.cfg.SweepInterval)
 	defer t.Stop()
 	for {
@@ -80,7 +96,8 @@ func (r *Roost) home(h *homed) {
 // sweep queries every member since the last sweep, unions by StoreID, puts
 // to each member whatever it lacks, applies ROOM state, and replays recent
 // undelivered messages to local devices (node protocol §7.2, §7.1 step 5).
-func (r *Roost) sweep(h *homed) {
+// It reports whether any member was reached.
+func (r *Roost) sweep(h *homed) bool {
 	now := unixNow()
 	since := h.lastSweep
 	members := r.inbox.membersFor(h.base)
@@ -105,7 +122,7 @@ func (r *Roost) sweep(h *homed) {
 		}
 	}
 	if reached == 0 {
-		return
+		return false
 	}
 	for id, ids := range have {
 		for sid, e := range union {
@@ -144,6 +161,7 @@ func (r *Roost) sweep(h *homed) {
 	}
 	h.lastSweep = now
 	r.log.Debug("sweep done", "callsign", h.base, "members_reached", reached, "envelopes", len(union))
+	return true
 }
 
 // onStored handles an EVENT from an inbox member: a new envelope stored for

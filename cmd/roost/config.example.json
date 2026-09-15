@@ -9,5 +9,6 @@
   "inbox_members": ["<public node peer ID>"],
   "rooms": [],
   "devices": ["N1ADJ  H"],
-  "metrics_interval": "60s"
+  "metrics_interval": "60s",
+  "admin": "127.0.0.1:8017"
 }

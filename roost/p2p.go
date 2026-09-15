@@ -14,6 +14,7 @@ import (
 	pb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
 	libp2ptls "github.com/libp2p/go-libp2p/p2p/security/tls"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	ma "github.com/multiformats/go-multiaddr"
@@ -46,11 +47,19 @@ func (r *Roost) startP2P() error {
 	}
 	if r.cfg.Caps.Has(CapPublic) {
 		opts = append(opts, libp2p.ForceReachabilityPublic())
-	} else if len(bootstrap) > 0 {
-		opts = append(opts, libp2p.EnableAutoRelayWithStaticRelays(bootstrap))
+	} else {
+		// A roost without the public capability is assumed to be behind
+		// NAT: it reserves relay slots on its bootstrap peers right away
+		// and hole-punches from there.
+		opts = append(opts, libp2p.ForceReachabilityPrivate())
+		if len(bootstrap) > 0 {
+			opts = append(opts, libp2p.EnableAutoRelayWithStaticRelays(bootstrap))
+		}
 	}
 	if r.cfg.Caps.Has(CapRelay) {
-		opts = append(opts, libp2p.EnableRelayService())
+		// The spike carries all traffic over the relay when hole punching
+		// fails, so the default per-connection limits are lifted.
+		opts = append(opts, libp2p.EnableRelayService(relay.WithInfiniteLimits()))
 	}
 	h, err := libp2p.New(opts...)
 	if err != nil {
@@ -95,6 +104,7 @@ func (r *Roost) startP2P() error {
 		})
 	}
 
+	r.dialer = newPeerDialer(r, bootstrap)
 	for _, ai := range bootstrap {
 		ai := ai
 		r.go_(func() { r.connectLoop(ai) })

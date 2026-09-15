@@ -123,10 +123,8 @@ func TestThreeNodeSpike(t *testing.T) {
 	cfgB := common
 	cfgB.Callsign, cfgB.Devices = "W1AW  R", []string{"W1AW"}
 	b := startRoost(t, cfgB, &dB)
-	// A direct A–B link stands in for the relayed connection the real spike gets.
-	if err := a.Connect(context.Background(), b.AddrInfo()); err != nil {
-		t.Fatal(err)
-	}
+	// A and B are not connected directly; they must find each other from
+	// presence and connect through the public node's relay (or hole punch).
 
 	n1adjH := mustAddr(t, "N1ADJ  H")
 	w1aw := mustAddr(t, "W1AW")

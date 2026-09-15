@@ -212,6 +212,7 @@ func (p *presence) receive(m *pubsub.Message) {
 		return
 	}
 	now := unixNow()
+	p.r.dialer.want(from)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	n := p.nodes[from]
@@ -219,6 +220,9 @@ func (p *presence) receive(m *pubsub.Message) {
 		n = &NodeInfo{Devices: map[envelope.Address]DeviceInfo{}}
 		p.nodes[from] = n
 		p.r.log.Info("new node", "peer", from, "callsign", msg.Card.Callsign, "caps", msg.Card.Caps)
+		// A node we have not seen may not have seen us either (it may
+		// have just started); publish our presence soon.
+		p.dirty = true
 	}
 	n.Card, n.Caps, n.Callsign, n.LastSeen = msg.Card, Capabilities(msg.Card.Caps), callsign, now
 	for _, h := range msg.Heard {

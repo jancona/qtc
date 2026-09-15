@@ -125,6 +125,7 @@ type Roost struct {
 	subs     *Subscriptions
 	rooms    *roomTopics
 	inbox    *inboxSet
+	dialer   *peerDialer
 	mem      *store.MemStore
 	server   *store.Server
 
@@ -201,6 +202,7 @@ func (r *Roost) Start(ctx context.Context) error {
 	r.inbox = newInboxSet(r)
 	r.go_(r.presence.run)
 	r.go_(r.rooms.run)
+	r.go_(r.dialer.run)
 	if r.cfg.MetricsInterval > 0 {
 		r.go_(r.runMetrics)
 	}
@@ -248,8 +250,17 @@ func (r *Roost) go_(f func()) {
 	}()
 }
 
-// ID is the node's libp2p peer ID.
+// ID is the node's libp2p peer ID. Valid after Start; see PeerID otherwise.
 func (r *Roost) ID() peer.ID { return r.host.ID() }
+
+// PeerID derives the node's peer ID from its key without starting.
+func (r *Roost) PeerID() (peer.ID, error) {
+	k, err := libp2pKey(r.key)
+	if err != nil {
+		return "", err
+	}
+	return peer.IDFromPrivateKey(k)
+}
 
 // AddrInfo is the node's ID and listen addresses, for other nodes' Bootstrap.
 func (r *Roost) AddrInfo() peer.AddrInfo {
