@@ -11,3 +11,5 @@ The daemon. Implements `docs/pigeon-node-protocol.md` on go-libp2p plus the M17_
 - Never deliver the same message ID to the same device twice.
 - libp2p is confined to this package. Measure RSS and goroutines; the Pi Zero 2 W target is real.
 - JSON Lines on `/pigeon/0/store`; envelopes are base64 and are never re-encoded.
+- Spike stubs, to be removed in later milestones: the inbox member set is static (`Config.InboxMembers`) instead of DHT inbox records; there is no M17_inet face yet, so local devices come from `Config.Devices` and messages enter through `Roost.Send` / `Roost.HandleRoom`.
+- `roost_test.go` runs the three-node spike topology in one process. It needs the network stack and takes about 10 s; `go test -short` skips it.

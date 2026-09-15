@@ -1,0 +1,13 @@
+{
+  "callsign": "N1ADJ  H",
+  "key_file": "/var/lib/roost/node.key",
+  "listen": ["/ip4/0.0.0.0/tcp/0"],
+  "bootstrap": ["/ip4/203.0.113.10/tcp/4001/p2p/<public node peer ID>"],
+  "caps": [],
+  "software": "roost/0.1",
+  "dht": true,
+  "inbox_members": ["<public node peer ID>"],
+  "rooms": [],
+  "devices": ["N1ADJ  H"],
+  "metrics_interval": "60s"
+}

@@ -39,7 +39,7 @@ Unknown fields must be ignored. JSON is chosen over a binary encoding for debugg
 
 ## 2. Node Advertisement
 
-Each node publishes, in its libp2p identify data and in its presence messages, a **node card**:
+Each node publishes, in its presence messages (§3), a **node card**. libp2p identify carries only an agent string and a protocol list, so the card travels in presence alone; the identify agent string is set to the card's `software` value.
 
 | Key | Type | Meaning |
 |---|---|---|
@@ -51,11 +51,11 @@ Each node publishes, in its libp2p identify data and in its presence messages, a
 
 Topic: `/pigeon/0/presence`
 
-Every node publishes a presence message on change and at least every 5 minutes while it has any active callsigns:
+Every node publishes a presence message on change and at least every 5 minutes, whether or not it has any active callsigns, since presence is how other nodes learn its card (an inbox node with no local users must still be discoverable):
 
 | Key | Type | Meaning |
 |---|---|---|
-| node | nodeid | Publishing node ID |
+| node | nodeid | Publishing node ID. Informational: receivers take the publisher's identity from the gossipsub message signature and ignore a message whose `node` does not match the signer |
 | card | map | Node card (§2) |
 | time | timestamp | Publisher's current time |
 | heard | array | Entries, each: `device` address (full, with suffix), `via` integer (1 RF, 2 local client, 3 internet client), `last` timestamp |
@@ -78,11 +78,12 @@ DHT key: `/pigeon/0/inbox/<BASE>` where `<BASE>` is the base callsign in canonic
 | policy | integer | Flags: `split_by_suffix` 1, `provisional` 2 |
 | updated | timestamp | |
 | writer | nodeid | Node ID that wrote this version |
+| writer_key | bytes | The writer's public key as SubjectPublicKeyInfo DER. Needed because an ECDSA peer ID is a hash of the key, not the key itself |
 | sig | bytes | Writer's ECDSA signature, raw `r ‖ s` (64 bytes), over the canonical field concatenation below |
 
 **Signature input.** JSON has no canonical form, so the signature is computed over a fixed byte string rather than the serialized record: the 6-byte encoded `callsign`, `version` as 8 bytes big-endian, the raw bytes of `loft`, then each member's raw bytes in the order listed, `k` as 1 byte, `policy` as 2 bytes big-endian, `updated` as 4 bytes big-endian, and the raw bytes of `writer`. Readers rebuild this from the parsed fields and verify.
 
-**Validation** (applied by the DHT validator and by every reader): `sig` verifies against `writer`'s key; `version` is greater than any previously seen version for this callsign. Ties and lower versions are rejected.
+**Validation** (applied by the DHT validator and by every reader): `writer_key` hashes to `writer`; `sig` verifies against `writer_key`; `version` is greater than any previously seen version for this callsign. Ties and lower versions are rejected.
 
 **Authority** (a convention nodes must follow, not enforceable by the validator): a node may write a record only if it is the record's `loft`, or there is no record, or the current `loft` has been silent in presence for the takeover period (default 7 days), or it is handing off a record it created on a sender's behalf (§7.3). Readers should prefer a record whose `writer` equals its `loft` when versions conflict in the DHT's eventual consistency.
 

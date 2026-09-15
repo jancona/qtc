@@ -143,7 +143,7 @@ A MSG whose Destination is a room is delivered to every client subscribed to tha
 
 | Value  | Name        | Issued by | Meaning |
 |-------:|-------------|-----------|---------|
-| `0x00` | QUEUED      | Node      | A node has accepted the message for store-and-forward. Sent at most once, by the first node to store it. |
+| `0x00` | QUEUED      | Node      | The sender's node reports that the message has been accepted for store-and-forward (at least one inbox member has stored it). Sent at most once, by the sender's node; inbox nodes never issue receipts. |
 | `0x01` | TRANSMITTED | Node      | The message was transmitted on RF, or sent to a legacy client, toward the recipient. Receipt is not confirmed. Last heard indicates how recently the recipient was active at this node. |
 | `0x02` | DELIVERED   | Client    | The recipient's client received the message. Never issued by a node. |
 | `0x03` | —           | —         | Reserved for a future READ status. |
