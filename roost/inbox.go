@@ -131,12 +131,53 @@ func (c *memberConn) watch(ctx context.Context, calls ...envelope.Address) error
 	return cl.Watch(calls...)
 }
 
-// eventLoop delivers EVENTs from one member until the stream ends.
+// eventLoop delivers EVENTs from one member until the stream ends, then
+// reconnects so the WATCH is restored, and sweeps to pick up anything
+// stored while the stream was down.
 func (r *Roost) eventLoop(id peer.ID, cl *store.Client) {
 	for ev := range cl.Events() {
 		r.onStored(ev.Callsign, ev.Env, id)
 	}
 	r.log.Info("store stream closed", "member", id, "err", cl.Err())
+	r.inbox.rewatch(id)
+}
+
+// rewatch reopens the stream to a member with backoff until it succeeds
+// (client re-sends the WATCH set), then sweeps every homed callsign.
+func (s *inboxSet) rewatch(id peer.ID) {
+	c := s.conn(id)
+	c.mu.Lock()
+	n := len(c.watched)
+	c.mu.Unlock()
+	if n == 0 {
+		return
+	}
+	delay := 5 * time.Second
+	for {
+		select {
+		case <-s.r.ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+		ctx, cancel := context.WithTimeout(s.r.ctx, 30*time.Second)
+		_, err := c.client(ctx)
+		cancel()
+		if err == nil {
+			s.r.log.Info("store stream reopened", "member", id)
+			break
+		}
+		s.r.log.Debug("store reconnect failed", "member", id, "err", err, "retry_in", delay)
+		delay = min(delay*2, time.Minute)
+	}
+	s.r.mu.Lock()
+	homed := make([]*homed, 0, len(s.r.homed))
+	for _, h := range s.r.homed {
+		homed = append(homed, h)
+	}
+	s.r.mu.Unlock()
+	for _, h := range homed {
+		s.r.sweep(h)
+	}
 }
 
 // putAll stores e under callsign on every inbox member, retrying each until

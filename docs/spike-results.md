@@ -1,6 +1,6 @@
 # Spike results
 
-**Status:** in progress, 2026-09-15. Milestone 1 of the architecture (§9).
+**Status:** complete for the single-network case, 2026-09-15. Milestone 1 of the architecture (§9).
 
 ## Setup
 
@@ -32,6 +32,7 @@ All three machines were on one home LAN. The first run bootstrapped over LAN add
 - The first version of that dialer tried once and then waited 5 minutes; a DHT lookup that ran before the routing table had filled failed with "not found" and the roosts stayed apart. It now retries with backoff from 30 s to 5 min, and falls back to a relayed address through each bootstrap peer, which a NATed roost can always use.
 - A node that restarted missed the presence others had already published and was not learned for up to 5 minutes. Nodes now republish presence when a new node appears.
 - The public node's relay service ran with libp2p's default limits (2 min, 128 KB per relayed connection), which would cut a relayed gossipsub link; the spike lifts the limits. Whether production nodes should is an open question (Node Protocol §12).
+- Found by the soak: when a store stream to an inbox member dropped (the Mac slept), nothing reopened it, so the WATCH was gone until the next hourly sweep and a message sent five hours in was not delivered. The event loop now reopens the stream with backoff, which re-sends the WATCH, and sweeps each homed callsign. Verified by restarting the inbox node: both roosts reopened within 15 s and the next message was delivered with receipts.
 
 ## Measurements
 
@@ -54,7 +55,22 @@ Roost on the Pi Zero after start-up and the tests above, idle:
 
 Public node on the Pi 5 with relay service and inbox: RSS 27 MB, 80 goroutines, 0 % CPU. Mac: RSS 33 MB.
 
-One-hour soak: pending.
+Five-hour soak on the Pi Zero (16:24 to 21:24, 299 one-minute samples), roost idle apart from presence and the Mac's sleep/wake reconnections:
+
+| Metric | Range over the soak |
+|---|---|
+| RSS at the end | 28 MB (max RSS 27 MB reported by the process itself, flat from the first sample) |
+| Go heap | 1 to 2 MB |
+| Goroutines | 74 to 85 |
+| CPU | 0 % in every sample; 0.1 % of one core as the process average |
+| Warnings or errors logged | 0 |
+| Load average at the end | 2.75 / 2.48 / 2.45 against a 2.5 baseline |
+| Free memory | 84 MB, against 100 MB before roost |
+| Log growth | 97 KB over five hours at debug level |
+
+`m17-gateway` was unaffected: 11 MB RSS and two cores of SX1255 DSP before and after.
+
+The public node over the same period: RSS 28 MB, 66 goroutines, 0 % CPU, and it expired the test messages on schedule (stored count fell from 4 to 2 as the 60-minute TTLs ran out). The Mac slept and woke at least three times; each time it reconnected to the public node and re-established the relayed connection to the hotspot within about 10 s.
 
 ## Open items from the run
 
@@ -65,4 +81,4 @@ One-hour soak: pending.
 
 ## Decision: does libp2p earn its weight?
 
-To be written after the soak and the internet-path test. Initial read: 27 MB RSS and no measurable CPU on a Pi Zero 2 W already running a software modem is well within budget; the 26 MB binary is the main cost.
+Yes, on this evidence. What it cost on the Pi Zero 2 W: 28 MB of RSS, no measurable CPU, about 16 MB of free memory, and a 26 MB binary, alongside a gateway already running a software modem on two cores. What it gave for free: TLS-authenticated transport, peer identity from the node key, NAT traversal through a relay with hole punching available, gossipsub for presence and rooms, and a DHT ready for inbox records. The bugs found during the run were all in roost's use of those pieces (reconnection, dialing, presence timing), not in the pieces themselves. The remaining risk is the untested hole-punching path between two different NATs, which does not change the decision because the relay path works and its cost is the public node's bandwidth.
