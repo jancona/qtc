@@ -1,11 +1,11 @@
-package roost
+package qtcd
 
 import (
 	"errors"
 	"reflect"
 	"testing"
 
-	"github.com/jancona/pigeon/envelope"
+	"github.com/jancona/qtc/envelope"
 )
 
 const t0 uint32 = 1789128000

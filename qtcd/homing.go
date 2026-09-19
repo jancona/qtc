@@ -1,11 +1,11 @@
-package roost
+package qtcd
 
 import (
 	"context"
 	"fmt"
 	"time"
 
-	"github.com/jancona/pigeon/envelope"
+	"github.com/jancona/qtc/envelope"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
@@ -15,11 +15,11 @@ type homed struct {
 	lastSweep uint32
 }
 
-// Heard tells the roost that a local device was heard, via RF, a local
+// Heard tells the station that a local device was heard, via RF, a local
 // client, or an internet client. It publishes presence, auto-subscribes the
 // callsign to the local room, and begins homing the base callsign if it is
-// not already homed: WATCH on every inbox member, then a sweep.
-func (r *Roost) Heard(device envelope.Address, via Via, now uint32) error {
+// not already homed: WATCH on every mailbox member, then a sweep.
+func (r *Station) Heard(device envelope.Address, via Via, now uint32) error {
 	if !device.IsStandard() {
 		return fmt.Errorf("%w: %s", ErrNotCallsign, device)
 	}
@@ -44,7 +44,7 @@ func (r *Roost) Heard(device envelope.Address, via Via, now uint32) error {
 }
 
 // Homed reports the base callsigns this node currently homes.
-func (r *Roost) Homed() []envelope.Address {
+func (r *Station) Homed() []envelope.Address {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	out := make([]envelope.Address, 0, len(r.homed))
@@ -55,16 +55,16 @@ func (r *Roost) Homed() []envelope.Address {
 }
 
 // home runs the homing loop for one base callsign: watch, sweep, and
-// resweep at the configured interval while the roost runs.
-func (r *Roost) home(h *homed) {
-	// Until a first watch and sweep succeed (the inbox node may not be
+// resweep at the configured interval while the station runs.
+func (r *Station) home(h *homed) {
+	// Until a first watch and sweep succeed (the mailbox node may not be
 	// reachable yet), retry every 30 seconds rather than at the sweep
 	// interval.
 	for {
 		watched := 0
-		for _, id := range r.inbox.membersFor(h.base) {
+		for _, id := range r.mailbox.membersFor(h.base) {
 			ctx, cancel := context.WithTimeout(r.ctx, 30*time.Second)
-			err := r.inbox.conn(id).watch(ctx, h.base)
+			err := r.mailbox.conn(id).watch(ctx, h.base)
 			cancel()
 			if err != nil {
 				r.log.Warn("watch failed", "member", id, "callsign", h.base, "err", err)
@@ -97,10 +97,10 @@ func (r *Roost) home(h *homed) {
 // to each member whatever it lacks, applies ROOM state, and replays recent
 // undelivered messages to local devices (node protocol §7.2, §7.1 step 5).
 // It reports whether any member was reached.
-func (r *Roost) sweep(h *homed) bool {
+func (r *Station) sweep(h *homed) bool {
 	now := unixNow()
 	since := h.lastSweep
-	members := r.inbox.membersFor(h.base)
+	members := r.mailbox.membersFor(h.base)
 	ctx, cancel := context.WithTimeout(r.ctx, 2*time.Minute)
 	defer cancel()
 
@@ -108,7 +108,7 @@ func (r *Roost) sweep(h *homed) bool {
 	have := map[peer.ID]map[envelope.ID]bool{}
 	reached := 0
 	for _, id := range members {
-		envs, err := r.inbox.query(ctx, id, h.base, since)
+		envs, err := r.mailbox.query(ctx, id, h.base, since)
 		if err != nil {
 			r.log.Warn("sweep query failed", "member", id, "callsign", h.base, "err", err)
 			continue
@@ -127,12 +127,12 @@ func (r *Roost) sweep(h *homed) bool {
 	for id, ids := range have {
 		for sid, e := range union {
 			if !ids[sid] {
-				r.go_(func() { r.inbox.putRetry(id, h.base, e, nil, nil) })
+				r.go_(func() { r.mailbox.putRetry(id, h.base, e, nil, nil) })
 			}
 		}
 	}
 
-	// Which messages already have a DELIVERED receipt in the inbox?
+	// Which messages already have a DELIVERED receipt in the mailbox?
 	delivered := map[envelope.ID]bool{}
 	for _, e := range union {
 		if rc, ok := e.Rcpt(); ok && rc.Status() == envelope.StatusDelivered {
@@ -164,9 +164,9 @@ func (r *Roost) sweep(h *homed) bool {
 	return true
 }
 
-// onStored handles an EVENT from an inbox member: a new envelope stored for
+// onStored handles an EVENT from a mailbox member: a new envelope stored for
 // a callsign this node watches.
-func (r *Roost) onStored(callsign envelope.Address, e *envelope.Envelope, from peer.ID) {
+func (r *Station) onStored(callsign envelope.Address, e *envelope.Envelope, from peer.ID) {
 	r.log.Debug("event", "callsign", callsign, "member", from, "envelope", e)
 	switch e.Type() {
 	case envelope.TypeROOM:
@@ -181,7 +181,7 @@ func (r *Roost) onStored(callsign envelope.Address, e *envelope.Envelope, from p
 // deliverLocal delivers a MSG or RCPT to the local devices it addresses,
 // once per message ID and device (node protocol §7.4), issuing TRANSMITTED
 // when a MSG asked for a receipt.
-func (r *Roost) deliverLocal(e *envelope.Envelope) {
+func (r *Station) deliverLocal(e *envelope.Envelope) {
 	dst := e.Destination()
 	var devices []envelope.Address
 	switch {
@@ -214,7 +214,7 @@ func (r *Roost) deliverLocal(e *envelope.Envelope) {
 
 // markDelivered records a (message, device) delivery, returning false if it
 // already happened. RCPT and ROOM use their StoreID.
-func (r *Roost) markDelivered(e *envelope.Envelope, device envelope.Address) bool {
+func (r *Station) markDelivered(e *envelope.Envelope, device envelope.Address) bool {
 	k := deliveryKey{id: e.StoreID(), device: device}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -226,24 +226,24 @@ func (r *Roost) markDelivered(e *envelope.Envelope, device envelope.Address) boo
 }
 
 // issueReceipt builds a receipt from this node about msg and stores it on
-// the original sender's inbox.
-func (r *Roost) issueReceipt(msg *envelope.Envelope, status envelope.Status, lastHeard, now uint32) {
+// the original sender's mailbox.
+func (r *Station) issueReceipt(msg *envelope.Envelope, status envelope.Status, lastHeard, now uint32) {
 	rc, err := envelope.BuildRcpt(r.callsign, msg.Source(), msg.ID(), status, now, lastHeard, "")
 	if err != nil {
 		r.log.Error("build receipt", "err", err)
 		return
 	}
 	r.log.Debug("issuing receipt", "receipt", rc)
-	r.inbox.putAll(msg.Source().Base(), rc, nil)
+	r.mailbox.putAll(msg.Source().Base(), rc, nil)
 }
 
 // Send accepts an envelope from a local device (node protocol §6). A MSG to
-// a callsign is stored on the destination's and the sender's inboxes, with
+// a callsign is stored on the destination's and the sender's mailboxes, with
 // QUEUED issued once if requested. A MSG to a room is published to the room
-// topic, stored on each local subscriber's inbox, and records an implicit
-// join. A RCPT goes to its destination's inbox. ROOM requests are answered
+// topic, stored on each local subscriber's mailbox, and records an implicit
+// join. A RCPT goes to its destination's mailbox. ROOM requests are answered
 // with HandleRoom, not Send.
-func (r *Roost) Send(e *envelope.Envelope) error {
+func (r *Station) Send(e *envelope.Envelope) error {
 	switch e.Type() {
 	case envelope.TypeMSG:
 		m, _ := e.Msg()
@@ -257,7 +257,7 @@ func (r *Roost) Send(e *envelope.Envelope) error {
 			if err != nil {
 				return err
 			}
-			r.inbox.putAll(e.Source().Base(), join, nil)
+			r.mailbox.putAll(e.Source().Base(), join, nil)
 			r.rooms.publish(dst, e)
 			r.storeRoomMessage(e)
 			r.deliverLocal(e)
@@ -275,39 +275,39 @@ func (r *Roost) Send(e *envelope.Envelope) error {
 					}
 				}
 			}
-			r.inbox.putAll(dst.Base(), e, onFirst)
+			r.mailbox.putAll(dst.Base(), e, onFirst)
 			if dst.Base() != e.Source().Base() {
-				r.inbox.putAll(e.Source().Base(), e, nil)
+				r.mailbox.putAll(e.Source().Base(), e, nil)
 			}
 			// Fast path for a destination homed here; the EVENT would also
 			// deliver, and dedup makes that harmless.
 			r.deliverLocal(e)
 			return nil
 		}
-		return fmt.Errorf("roost: cannot send to %s", dst)
+		return fmt.Errorf("qtcd: cannot send to %s", dst)
 	case envelope.TypeRCPT:
-		r.inbox.putAll(e.Destination().Base(), e, nil)
+		r.mailbox.putAll(e.Destination().Base(), e, nil)
 		return nil
 	}
-	return fmt.Errorf("roost: Send does not accept %s", e.Type())
+	return fmt.Errorf("qtcd: Send does not accept %s", e.Type())
 }
 
 // HandleRoom processes a ROOM request from a local device and returns the
-// reply. Accepted JOIN and LEAVE state is stored on the callsign's inbox.
-func (r *Roost) HandleRoom(device envelope.Address, req *envelope.Envelope) (*envelope.Envelope, error) {
+// reply. Accepted JOIN and LEAVE state is stored on the callsign's mailbox.
+func (r *Station) HandleRoom(device envelope.Address, req *envelope.Envelope) (*envelope.Envelope, error) {
 	reply, toStore, err := r.subs.Handle(device, req, unixNow())
 	if err != nil {
 		return nil, err
 	}
 	if toStore != nil {
-		r.inbox.putAll(device.Base(), toStore, nil)
+		r.mailbox.putAll(device.Base(), toStore, nil)
 	}
 	return reply, nil
 }
 
-// storeRoomMessage queues a room MSG on the inbox of every local subscriber
+// storeRoomMessage queues a room MSG on the mailbox of every local subscriber
 // (rooms spec §7.2).
-func (r *Roost) storeRoomMessage(e *envelope.Envelope) {
+func (r *Station) storeRoomMessage(e *envelope.Envelope) {
 	for _, base := range r.subs.Subscribers(e.Destination()) {
 		a, err := envelope.EncodeAddress(base)
 		if err != nil {
@@ -316,6 +316,6 @@ func (r *Roost) storeRoomMessage(e *envelope.Envelope) {
 		if len(r.presence.localDevices(a)) == 0 {
 			continue
 		}
-		r.inbox.putAll(a, e, nil)
+		r.mailbox.putAll(a, e, nil)
 	}
 }

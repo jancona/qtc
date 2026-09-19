@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jancona/pigeon/envelope"
+	"github.com/jancona/qtc/envelope"
 )
 
 const t0 uint32 = 1789128000

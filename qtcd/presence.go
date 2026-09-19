@@ -1,4 +1,4 @@
-package roost
+package qtcd
 
 import (
 	"encoding/json"
@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jancona/pigeon/envelope"
+	"github.com/jancona/qtc/envelope"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
@@ -38,7 +38,7 @@ const (
 	heardPublishMin     = 5 * 60         // per-device republish floor
 )
 
-// DeviceInfo is one heard entry in the roost table.
+// DeviceInfo is one heard entry in the station table.
 type DeviceInfo struct {
 	Via  Via
 	Last uint32
@@ -53,9 +53,9 @@ type NodeInfo struct {
 	Devices  map[envelope.Address]DeviceInfo
 }
 
-// presence publishes this node's presence and keeps the roost table.
+// presence publishes this node's presence and keeps the station table.
 type presence struct {
-	r     *Roost
+	r     *Station
 	topic *pubsub.Topic
 
 	mu    sync.Mutex
@@ -71,7 +71,7 @@ type localDevice struct {
 	publishedVia  Via
 }
 
-func newPresence(r *Roost) *presence {
+func newPresence(r *Station) *presence {
 	return &presence{r: r, local: map[envelope.Address]*localDevice{}, nodes: map[peer.ID]*NodeInfo{}}
 }
 
@@ -254,8 +254,8 @@ func (p *presence) expire(now uint32) {
 	}
 }
 
-// Roosts returns the nodes with an unexpired entry for any device of base.
-func (p *presence) Roosts(base envelope.Address) []peer.ID {
+// Stations returns the nodes with an unexpired entry for any device of base.
+func (p *presence) Stations(base envelope.Address) []peer.ID {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	var out []peer.ID

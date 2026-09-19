@@ -1,4 +1,4 @@
-module github.com/jancona/pigeon
+module github.com/jancona/qtc
 
 go 1.26.2
 

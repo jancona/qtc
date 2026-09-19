@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jancona/pigeon/envelope"
+	"github.com/jancona/qtc/envelope"
 )
 
 // Server serves the storage protocol against a Store. One Server handles

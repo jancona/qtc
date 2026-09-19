@@ -1,4 +1,4 @@
-package roost
+package qtcd
 
 import (
 	"encoding/json"
@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jancona/pigeon/envelope"
+	"github.com/jancona/qtc/envelope"
 )
 
-// Admin is a small HTTP interface on a local address for driving a roost by
+// Admin is a small HTTP interface on a local address for driving a station by
 // hand during the spike, standing in for the M17_inet face. Endpoints:
 //
 //	GET  /status                      node ID, peers, homed callsigns, rooms, presence
@@ -22,22 +22,22 @@ import (
 //
 // It must only listen on a loopback address.
 type Admin struct {
-	r   *Roost
+	r   *Station
 	srv *http.Server
 }
 
 // ServeAdmin starts the admin listener on addr and returns it.
-func (r *Roost) ServeAdmin(addr string) (*Admin, error) {
+func (r *Station) ServeAdmin(addr string) (*Admin, error) {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
-		return nil, fmt.Errorf("roost: admin addr %q: %w", addr, err)
+		return nil, fmt.Errorf("qtcd: admin addr %q: %w", addr, err)
 	}
 	if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
-		return nil, fmt.Errorf("roost: admin addr %q is not a loopback address", addr)
+		return nil, fmt.Errorf("qtcd: admin addr %q is not a loopback address", addr)
 	}
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		return nil, fmt.Errorf("roost: admin listen: %w", err)
+		return nil, fmt.Errorf("qtcd: admin listen: %w", err)
 	}
 	a := &Admin{r: r}
 	mux := http.NewServeMux()
@@ -108,7 +108,7 @@ func (a *Admin) status(w http.ResponseWriter, req *http.Request) {
 	enc.Encode(out)
 }
 
-func addrStrings(r *Roost) []string {
+func addrStrings(r *Station) []string {
 	var out []string
 	for _, a := range r.host.Addrs() {
 		out = append(out, a.String())

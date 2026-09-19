@@ -1,12 +1,12 @@
 {
   "callsign": "N1ADJ  H",
-  "key_file": "/var/lib/roost/node.key",
+  "key_file": "/var/lib/qtcd/node.key",
   "listen": ["/ip4/0.0.0.0/tcp/0"],
-  "bootstrap": ["/ip4/203.0.113.10/tcp/4001/p2p/<public node peer ID>"],
+  "bootstrap": ["/ip4/203.0.113.10/tcp/4001/p2p/<public station peer ID>"],
   "caps": [],
-  "software": "roost/0.1",
+  "software": "qtcd/0.1",
   "dht": true,
-  "inbox_members": ["<public node peer ID>"],
+  "mailbox_members": ["<public station peer ID>"],
   "rooms": [],
   "devices": ["N1ADJ  H"],
   "metrics_interval": "60s",
@@ -15,7 +15,7 @@
     "listen": "0.0.0.0:17000",
     "hosts_file": "/opt/m17/m17-gateway/M17Hosts.txt",
     "modules": {
-      "A": {"reflector": "M17-M17", "module": "C", "mode": "pigeon"},
+      "A": {"reflector": "M17-M17", "module": "C", "mode": "qtc"},
       "B": {"reflector": "M17-M17", "module": "C", "mode": "native"}
     }
   }

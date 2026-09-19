@@ -1,4 +1,4 @@
-package roost
+package qtcd
 
 import (
 	"runtime"
@@ -9,7 +9,7 @@ import (
 // runMetrics logs process resource use at the configured interval so spike
 // results can be recorded: goroutines, heap, max RSS, and CPU fraction since
 // the previous sample.
-func (r *Roost) runMetrics() {
+func (r *Station) runMetrics() {
 	t := time.NewTicker(r.cfg.MetricsInterval)
 	defer t.Stop()
 	lastCPU, lastWall := cpuTime(), time.Now()

@@ -1,4 +1,4 @@
-package roost
+package qtcd
 
 import (
 	"context"
@@ -11,14 +11,15 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 )
 
-// peerDialer keeps connections to the other roosts learned from presence so
+// peerDialer keeps connections to the other stations learned from presence so
 // that gossipsub has a path for room topics. Addresses come from the
-// peerstore, then the DHT, and finally a relayed address through each
-// bootstrap relay, which a NATed roost can always reach; hole punching
-// upgrades a relayed connection to a direct one when it can. Attempts back
+// peerstore, then the DHT, and finally a circuit-relayed address through
+// each bootstrap peer's circuit relay, which a NATed station can always
+// reach; hole punching upgrades a relayed connection to a direct one when it
+// can. Attempts back
 // off per peer from 30 s to 5 min while the peer stays unconnected.
 type peerDialer struct {
-	r      *Roost
+	r      *Station
 	relays []peer.AddrInfo
 
 	mu    sync.Mutex
@@ -37,7 +38,7 @@ const (
 	dialPass       = 15 * time.Second
 )
 
-func newPeerDialer(r *Roost, relays []peer.AddrInfo) *peerDialer {
+func newPeerDialer(r *Station, relays []peer.AddrInfo) *peerDialer {
 	return &peerDialer{r: r, relays: relays, state: map[peer.ID]*dialState{}}
 }
 
@@ -85,7 +86,7 @@ func (d *peerDialer) want(id peer.ID) {
 		if err != nil {
 			st.next = time.Now().Add(st.backoff)
 			st.backoff = min(st.backoff*2, dialBackoffMax)
-			d.r.log.Debug("dial roost failed", "peer", id, "err", err, "retry_in", time.Until(st.next).Round(time.Second))
+			d.r.log.Debug("dial station failed", "peer", id, "err", err, "retry_in", time.Until(st.next).Round(time.Second))
 		} else {
 			delete(d.state, id)
 		}
@@ -122,6 +123,6 @@ func (d *peerDialer) dial(id peer.ID) error {
 	for _, c := range d.r.host.Network().ConnsToPeer(id) {
 		via = append(via, c.RemoteMultiaddr().String())
 	}
-	d.r.log.Info("connected to roost", "peer", id, "via", via)
+	d.r.log.Info("connected to station", "peer", id, "via", via)
 	return nil
 }

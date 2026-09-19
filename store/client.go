@@ -10,7 +10,7 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/jancona/pigeon/envelope"
+	"github.com/jancona/qtc/envelope"
 )
 
 // Event is an EVENT message: a newly stored envelope for a watched callsign.
@@ -22,7 +22,7 @@ type Event struct {
 // ErrClosed is returned once the client's stream has ended.
 var ErrClosed = errors.New("store: stream closed")
 
-// Client speaks the storage protocol over one stream to an inbox node. It
+// Client speaks the storage protocol over one stream to a mailbox node. It
 // keeps one request in flight at a time, since the protocol has no request
 // IDs and replies come back in order. Events arrive on Events regardless of
 // requests; the caller must drain them or requests will stall.

@@ -1,4 +1,4 @@
-package roost
+package qtcd
 
 import (
 	"bufio"
@@ -20,7 +20,7 @@ type reflectorHost struct {
 func loadHostsFile(path string) (map[string]reflectorHost, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("roost: hosts file: %w", err)
+		return nil, fmt.Errorf("qtcd: hosts file: %w", err)
 	}
 	defer f.Close()
 	hosts := map[string]reflectorHost{}
@@ -34,17 +34,17 @@ func loadHostsFile(path string) (map[string]reflectorHost, error) {
 		}
 		fields := strings.Fields(text)
 		if len(fields) < 3 {
-			return nil, fmt.Errorf("roost: hosts file %s line %d: need NAME HOST PORT", path, line)
+			return nil, fmt.Errorf("qtcd: hosts file %s line %d: need NAME HOST PORT", path, line)
 		}
 		port, err := strconv.ParseUint(fields[2], 10, 16)
 		if err != nil {
-			return nil, fmt.Errorf("roost: hosts file %s line %d: bad port %q", path, line, fields[2])
+			return nil, fmt.Errorf("qtcd: hosts file %s line %d: bad port %q", path, line, fields[2])
 		}
 		name := strings.ToUpper(fields[0])
 		hosts[name] = reflectorHost{Name: name, Addr: net.JoinHostPort(fields[1], strconv.FormatUint(port, 10))}
 	}
 	if err := sc.Err(); err != nil {
-		return nil, fmt.Errorf("roost: hosts file %s: %w", path, err)
+		return nil, fmt.Errorf("qtcd: hosts file %s: %w", path, err)
 	}
 	return hosts, nil
 }

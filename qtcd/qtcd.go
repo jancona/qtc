@@ -1,4 +1,4 @@
-package roost
+package qtcd
 
 import (
 	"context"
@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jancona/pigeon/envelope"
-	"github.com/jancona/pigeon/store"
+	"github.com/jancona/qtc/envelope"
+	"github.com/jancona/qtc/store"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/host"
@@ -23,7 +23,7 @@ type Capabilities uint8
 const (
 	CapPublic  Capabilities = 1
 	CapRelay   Capabilities = 2
-	CapInbox   Capabilities = 4
+	CapMailbox Capabilities = 4
 	CapClients Capabilities = 8
 )
 
@@ -39,7 +39,7 @@ const (
 	ViaInternet Via = 3
 )
 
-// Config configures a Roost. Zero durations take the node protocol §11
+// Config configures a Station. Zero durations take the node protocol §11
 // defaults.
 type Config struct {
 	// Callsign is the node callsign, used whole ("K1XYZ  R"). Its base
@@ -48,22 +48,22 @@ type Config struct {
 	// KeyFile holds the node's ECDSA P-256 key in PKCS #8 PEM. It is
 	// generated if missing. Empty uses an ephemeral key (tests).
 	KeyFile string
-	// ListenAddrs are libp2p multiaddrs to listen on. Public nodes should
+	// ListenAddrs are libp2p multiaddrs to listen on. Public stations should
 	// use a fixed port; others may use port 0.
 	ListenAddrs []string
-	// Bootstrap are multiaddrs (with /p2p/<ID>) of public nodes to connect
-	// to at start. They also serve as static relays for a node behind NAT.
+	// Bootstrap are multiaddrs (with /p2p/<ID>) of public stations to connect
+	// to at start. They also serve as static circuit relays for a node behind NAT.
 	Bootstrap []string
-	// Caps is the node card's capability set. CapInbox runs a store server.
+	// Caps is the node card's capability set. CapMailbox runs a store server.
 	Caps Capabilities
 	// Software is the node card's software string.
 	Software string
 	// EnableDHT turns on Kademlia peer discovery. Off is for in-process tests.
 	EnableDHT bool
 
-	// InboxMembers is the spike's static inbox: the peer IDs used as the
-	// inbox set for every callsign, in place of DHT inbox records.
-	InboxMembers []string
+	// MailboxMembers is the spike's static mailbox: the peer IDs used as the
+	// mailbox set for every callsign, in place of DHT mailbox records.
+	MailboxMembers []string
 
 	// Rooms lists the rooms this node carries; empty carries all.
 	Rooms []string
@@ -107,15 +107,15 @@ func (c *Config) defaults() {
 		c.DefaultTTL = store.DefaultTTLMinutes
 	}
 	if c.Software == "" {
-		c.Software = "roost/0"
+		c.Software = "qtcd/0"
 	}
 	if c.Log == nil {
 		c.Log = slog.Default()
 	}
 }
 
-// Roost is a Pigeon node.
-type Roost struct {
+// Station is a QTC node.
+type Station struct {
 	cfg      Config
 	log      *slog.Logger
 	callsign envelope.Address
@@ -128,7 +128,7 @@ type Roost struct {
 	presence *presence
 	subs     *Subscriptions
 	rooms    *roomTopics
-	inbox    *inboxSet
+	mailbox  *mailboxSet
 	dialer   *peerDialer
 	inet     *inetFace
 	mem      *store.MemStore
@@ -149,12 +149,12 @@ type deliveryKey struct {
 	device envelope.Address
 }
 
-// New builds a Roost from cfg without starting any network activity.
-func New(cfg Config) (*Roost, error) {
+// New builds a Station from cfg without starting any network activity.
+func New(cfg Config) (*Station, error) {
 	cfg.defaults()
 	callsign, err := envelope.EncodeAddress(cfg.Callsign)
 	if err != nil || !callsign.IsStandard() {
-		return nil, fmt.Errorf("roost: node callsign %q: %w", cfg.Callsign, errors.Join(err, ErrNotCallsign))
+		return nil, fmt.Errorf("qtcd: node callsign %q: %w", cfg.Callsign, errors.Join(err, ErrNotCallsign))
 	}
 	key, err := loadOrCreateKey(cfg.KeyFile)
 	if err != nil {
@@ -164,7 +164,7 @@ func New(cfg Config) (*Roost, error) {
 	for _, name := range cfg.Rooms {
 		a, err := envelope.RoomAddress(name)
 		if err != nil {
-			return nil, fmt.Errorf("roost: room %q: %w", name, err)
+			return nil, fmt.Errorf("qtcd: room %q: %w", name, err)
 		}
 		carried[a] = true
 	}
@@ -176,7 +176,7 @@ func New(cfg Config) (*Roost, error) {
 	if err != nil {
 		return nil, err
 	}
-	r := &Roost{
+	r := &Station{
 		cfg:       cfg,
 		log:       cfg.Log.With("node", cfg.Callsign),
 		callsign:  callsign,
@@ -195,8 +195,8 @@ func New(cfg Config) (*Roost, error) {
 }
 
 // Start brings up the libp2p host, pubsub, the store server if this node
-// has CapInbox, presence, and the configured local devices.
-func (r *Roost) Start(ctx context.Context) error {
+// has CapMailbox, presence, and the configured local devices.
+func (r *Station) Start(ctx context.Context) error {
 	r.ctx, r.cancel = context.WithCancel(ctx)
 	if err := r.startP2P(); err != nil {
 		r.cancel()
@@ -204,7 +204,7 @@ func (r *Roost) Start(ctx context.Context) error {
 	}
 	r.presence = newPresence(r)
 	r.rooms = newRoomTopics(r)
-	r.inbox = newInboxSet(r)
+	r.mailbox = newMailboxSet(r)
 	r.go_(r.presence.run)
 	r.go_(r.rooms.run)
 	r.go_(r.dialer.run)
@@ -226,25 +226,25 @@ func (r *Roost) Start(ctx context.Context) error {
 	for _, d := range r.cfg.Devices {
 		a, err := envelope.EncodeAddress(d)
 		if err != nil {
-			return fmt.Errorf("roost: device %q: %w", d, err)
+			return fmt.Errorf("qtcd: device %q: %w", d, err)
 		}
 		if err := r.Heard(a, ViaLocal, now); err != nil {
 			return err
 		}
 	}
-	r.log.Info("roost started", "id", r.host.ID(), "addrs", r.host.Addrs(), "caps", r.cfg.Caps)
+	r.log.Info("station started", "id", r.host.ID(), "addrs", r.host.Addrs(), "caps", r.cfg.Caps)
 	return nil
 }
 
 // Stop shuts everything down and waits for background work to finish.
-func (r *Roost) Stop() error {
+func (r *Station) Stop() error {
 	if r.cancel != nil {
 		r.cancel()
 	}
 	// Close store streams before waiting: event loops end only when their
 	// stream does.
-	if r.inbox != nil {
-		r.inbox.closeAll()
+	if r.mailbox != nil {
+		r.mailbox.closeAll()
 	}
 	r.wg.Wait()
 	var errs []error
@@ -257,7 +257,7 @@ func (r *Roost) Stop() error {
 	return errors.Join(errs...)
 }
 
-func (r *Roost) go_(f func()) {
+func (r *Station) go_(f func()) {
 	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()
@@ -266,10 +266,10 @@ func (r *Roost) go_(f func()) {
 }
 
 // ID is the node's libp2p peer ID. Valid after Start; see PeerID otherwise.
-func (r *Roost) ID() peer.ID { return r.host.ID() }
+func (r *Station) ID() peer.ID { return r.host.ID() }
 
 // PeerID derives the node's peer ID from its key without starting.
-func (r *Roost) PeerID() (peer.ID, error) {
+func (r *Station) PeerID() (peer.ID, error) {
 	k, err := libp2pKey(r.key)
 	if err != nil {
 		return "", err
@@ -278,30 +278,30 @@ func (r *Roost) PeerID() (peer.ID, error) {
 }
 
 // AddrInfo is the node's ID and listen addresses, for other nodes' Bootstrap.
-func (r *Roost) AddrInfo() peer.AddrInfo {
+func (r *Station) AddrInfo() peer.AddrInfo {
 	return peer.AddrInfo{ID: r.host.ID(), Addrs: r.host.Addrs()}
 }
 
 // Callsign is the node callsign.
-func (r *Roost) Callsign() envelope.Address { return r.callsign }
+func (r *Station) Callsign() envelope.Address { return r.callsign }
 
 // Subscriptions exposes room subscription state.
-func (r *Roost) Subscriptions() *Subscriptions { return r.subs }
+func (r *Station) Subscriptions() *Subscriptions { return r.subs }
 
-// Presence exposes the roost table built from presence messages.
-func (r *Roost) Presence() *presence { return r.presence }
+// Presence exposes the station table built from presence messages.
+func (r *Station) Presence() *presence { return r.presence }
 
 func unixNow() uint32 { return uint32(time.Now().Unix()) }
 
 // deliverTo hands an envelope to every delivery sink for a device.
-func (r *Roost) deliverTo(device envelope.Address, e *envelope.Envelope) {
+func (r *Station) deliverTo(device envelope.Address, e *envelope.Envelope) {
 	r.cfg.Deliver(device, e)
 	if r.inet != nil {
 		r.inet.deliver(device, e)
 	}
 }
 
-func (r *Roost) runExpiry() {
+func (r *Station) runExpiry() {
 	t := time.NewTicker(time.Minute)
 	defer t.Stop()
 	for {

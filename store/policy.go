@@ -3,10 +3,10 @@ package store
 import (
 	"fmt"
 
-	"github.com/jancona/pigeon/envelope"
+	"github.com/jancona/qtc/envelope"
 )
 
-// Policy holds the inbox's retention settings (node protocol §5 and §11,
+// Policy holds the mailbox's retention settings (node protocol §5 and §11,
 // envelope §4.4).
 type Policy struct {
 	// DefaultTTL in minutes for a MSG with TTL 0xFFFF and for every RCPT.

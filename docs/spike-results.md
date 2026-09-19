@@ -6,41 +6,41 @@
 
 | Role | Machine | Node callsign | Notes |
 |---|---|---|---|
-| Public node: `public`, `relay`, `inbox` | Raspberry Pi 5, 4 GB, Raspbian 12, 44net address 44.27.19.158 (`ham.n1adj.net`) | `N1ADJ  P` | Listens on TCP 4001. DHT server. |
-| Roost A | Raspberry Pi Zero 2 W, 415 MB, Debian 13, running `m17-gateway` with an SX1255 modem | `N1ADJ  Z` | Homes `N1ADJ  H`. The memory and CPU target. |
-| Roost B | MacBook Pro | `N1ADJ  M` | Homes `N0CALL` (placeholder, nothing on the air) so its inbox differs from A's. |
+| Public station: `public`, `relay`, `mailbox` | Raspberry Pi 5, 4 GB, Raspbian 12, 44net address 44.27.19.158 (`ham.n1adj.net`) | `N1ADJ  P` | Listens on TCP 4001. DHT server. |
+| Station A | Raspberry Pi Zero 2 W, 415 MB, Debian 13, running `m17-gateway` with an SX1255 modem | `N1ADJ  Z` | Homes `N1ADJ  H`. The memory and CPU target. |
+| Station B | MacBook Pro | `N1ADJ  M` | Homes `N0CALL` (placeholder, nothing on the air) so its mailbox differs from A's. |
 
-roost commit: see git log for the deployment day. Config: presence every 5 min, sweep hourly, metrics every 60 s, admin HTTP on loopback for injecting messages by hand (stands in for the M17_inet face, milestone 2). Inbox membership is static (`inbox_members`); DHT inbox records are milestone 5.
+station commit: see git log for the deployment day. Config: presence every 5 min, sweep hourly, metrics every 60 s, admin HTTP on loopback for injecting messages by hand (stands in for the M17_inet face, milestone 2). Mailbox membership is static (`mailbox_members`); DHT mailbox records are milestone 5.
 
-All three machines were on one home LAN. The first run bootstrapped over LAN addresses; the second bootstrapped over the public node's 44net address (`/dns4/ham.n1adj.net/tcp/4001`) after TCP 4001 was opened, so the two roosts reached the public node over the internet even though they sit on the same LAN.
+All three machines were on one home LAN. The first run bootstrapped over LAN addresses; the second bootstrapped over the public station's 44net address (`/dns4/ham.n1adj.net/tcp/4001`) after TCP 4001 was opened, so the two stations reached the public station over the internet even though they sit on the same LAN.
 
 ## What worked
 
-- **Unicast with receipts.** `N1ADJ  H` on A to `N1ADJ  D` on B, RCPT_REQ set: delivered on B about 10 ms after the inbox node's EVENT, and A received both QUEUED (from itself) and TRANSMITTED (from B, with B's last-heard time for the device). Inbox node held 3 envelopes afterwards: the message and two receipts.
-- **Subscription state follows the callsign.** A JOIN on B for `N1ADJ  D` was stored on N1ADJ's inbox and A applied it from the EVENT, joining the room topic itself.
-- **Room over gossipsub.** After changing B's device to `N0CALL`, a room message from A reached B over the `/pigeon/0/room/MAINE` topic. A and B connected to each other after learning of one another from presence.
+- **Unicast with receipts.** `N1ADJ  H` on A to `N1ADJ  D` on B, RCPT_REQ set: delivered on B about 10 ms after the mailbox node's EVENT, and A received both QUEUED (from itself) and TRANSMITTED (from B, with B's last-heard time for the device). Mailbox node held 3 envelopes afterwards: the message and two receipts.
+- **Subscription state follows the callsign.** A JOIN on B for `N1ADJ  D` was stored on N1ADJ's mailbox and A applied it from the EVENT, joining the room topic itself.
+- **Room over gossipsub.** After changing B's device to `N0CALL`, a room message from A reached B over the `/qtc/0/room/MAINE` topic. A and B connected to each other after learning of one another from presence.
 - **Presence.** All three nodes see each other's cards and heard devices within one publish interval.
-- **Internet path.** With bootstrap on the 44net address, both roosts connected to the public node at 44.27.19.158:4001 (the public node saw them from the home network's public address). Unicast with receipts and the room message both worked over that path.
-- **Relay.** Roosts without the `public` capability declare themselves private, reserve a relay slot on their bootstrap peers, and advertise `/p2p-circuit` addresses. The two roosts connected to each other through the public node's relay (`.../tcp/4001/p2p/<public>/p2p-circuit`) about 25 s after start, and the room message flowed over that relayed gossipsub link. Hole punching did not upgrade to a direct connection, which is expected with both behind the same NAT; a second home network is needed to test that.
+- **Internet path.** With bootstrap on the 44net address, both stations connected to the public station at 44.27.19.158:4001 (the public station saw them from the home network's public address). Unicast with receipts and the room message both worked over that path.
+- **Circuit relay.** Stations without the `public` capability declare themselves private, reserve a circuit relay slot on their bootstrap peers, and advertise `/p2p-circuit` addresses. The two stations connected to each other through the public station's circuit relay (`.../tcp/4001/p2p/<public>/p2p-circuit`) about 25 s after start, and the room message flowed over that relayed gossipsub link. Hole punching did not upgrade to a direct connection, which is expected with both behind the same NAT; a second home network is needed to test that.
 
 ## Bugs found by the run, all fixed
 
 - Stop deadlocked waiting on store event loops before closing their streams.
 - A node with no local callsigns never published presence, so its card was undiscoverable. Spec changed to publish regardless (node protocol §3).
-- Homing gave up its first WATCH and sweep until the hourly sweep if the inbox node was unreachable at start. Now retried every 30 s until the first success.
-- Roosts never connected to each other, so room topics had no path. Now each roost dials the peers it learns from presence.
-- The first version of that dialer tried once and then waited 5 minutes; a DHT lookup that ran before the routing table had filled failed with "not found" and the roosts stayed apart. It now retries with backoff from 30 s to 5 min, and falls back to a relayed address through each bootstrap peer, which a NATed roost can always use.
+- Homing gave up its first WATCH and sweep until the hourly sweep if the mailbox node was unreachable at start. Now retried every 30 s until the first success.
+- Stations never connected to each other, so room topics had no path. Now each station dials the peers it learns from presence.
+- The first version of that dialer tried once and then waited 5 minutes; a DHT lookup that ran before the routing table had filled failed with "not found" and the stations stayed apart. It now retries with backoff from 30 s to 5 min, and falls back to a relayed address through each bootstrap peer, which a NATed station can always use.
 - A node that restarted missed the presence others had already published and was not learned for up to 5 minutes. Nodes now republish presence when a new node appears.
-- The public node's relay service ran with libp2p's default limits (2 min, 128 KB per relayed connection), which would cut a relayed gossipsub link; the spike lifts the limits. Whether production nodes should is an open question (Node Protocol §12).
-- Found by the soak: when a store stream to an inbox member dropped (the Mac slept), nothing reopened it, so the WATCH was gone until the next hourly sweep and a message sent five hours in was not delivered. The event loop now reopens the stream with backoff, which re-sends the WATCH, and sweeps each homed callsign. Verified by restarting the inbox node: both roosts reopened within 15 s and the next message was delivered with receipts.
+- The public station's circuit relay service ran with libp2p's default limits (2 min, 128 KB per relayed connection), which would cut a relayed gossipsub link; the spike lifts the limits. Whether production nodes should is an open question (Node Protocol §12).
+- Found by the soak: when a store stream to a mailbox member dropped (the Mac slept), nothing reopened it, so the WATCH was gone until the next hourly sweep and a message sent five hours in was not delivered. The event loop now reopens the stream with backoff, which re-sends the WATCH, and sweeps each homed callsign. Verified by restarting the mailbox node: both stations reopened within 15 s and the next message was delivered with receipts.
 
 ## Measurements
 
-Binary (`cmd/roost`, linux/arm64, `-trimpath -ldflags "-s -w"`): 26.1 MB.
+Binary (`cmd/qtcd`, linux/arm64, `-trimpath -ldflags "-s -w"`): 26.1 MB.
 
-Pi Zero 2 W baseline before roost, `m17-gateway` alone: load average 2.5, about 56 % CPU busy over 4 cores, 100 MB free, gateway RSS 11 MB at 199 % CPU (SX1255 DSP).
+Pi Zero 2 W baseline before station, `m17-gateway` alone: load average 2.5, about 56 % CPU busy over 4 cores, 100 MB free, gateway RSS 11 MB at 199 % CPU (SX1255 DSP).
 
-Roost on the Pi Zero after start-up and the tests above, idle:
+Station on the Pi Zero after start-up and the tests above, idle:
 
 | Metric | Value |
 |---|---|
@@ -49,13 +49,13 @@ Roost on the Pi Zero after start-up and the tests above, idle:
 | Goroutines | 78 to 84 |
 | Threads | 9 to 10 |
 | CPU | 0.3 to 0.5 % of one core |
-| Load average with roost | 2.4 to 2.7 (unchanged from baseline) |
-| Free memory | 83 MB (100 MB before roost) |
+| Load average with station | 2.4 to 2.7 (unchanged from baseline) |
+| Free memory | 83 MB (100 MB before station) |
 | Peers | 2 |
 
-Public node on the Pi 5 with relay service and inbox: RSS 27 MB, 80 goroutines, 0 % CPU. Mac: RSS 33 MB.
+Public station on the Pi 5 with circuit relay service and mailbox: RSS 27 MB, 80 goroutines, 0 % CPU. Mac: RSS 33 MB.
 
-Five-hour soak on the Pi Zero (16:24 to 21:24, 299 one-minute samples), roost idle apart from presence and the Mac's sleep/wake reconnections:
+Five-hour soak on the Pi Zero (16:24 to 21:24, 299 one-minute samples), station idle apart from presence and the Mac's sleep/wake reconnections:
 
 | Metric | Range over the soak |
 |---|---|
@@ -65,20 +65,20 @@ Five-hour soak on the Pi Zero (16:24 to 21:24, 299 one-minute samples), roost id
 | CPU | 0 % in every sample; 0.1 % of one core as the process average |
 | Warnings or errors logged | 0 |
 | Load average at the end | 2.75 / 2.48 / 2.45 against a 2.5 baseline |
-| Free memory | 84 MB, against 100 MB before roost |
+| Free memory | 84 MB, against 100 MB before station |
 | Log growth | 97 KB over five hours at debug level |
 
 `m17-gateway` was unaffected: 11 MB RSS and two cores of SX1255 DSP before and after.
 
-The public node over the same period: RSS 28 MB, 66 goroutines, 0 % CPU, and it expired the test messages on schedule (stored count fell from 4 to 2 as the 60-minute TTLs ran out). The Mac slept and woke at least three times; each time it reconnected to the public node and re-established the relayed connection to the hotspot within about 10 s.
+The public station over the same period: RSS 28 MB, 66 goroutines, 0 % CPU, and it expired the test messages on schedule (stored count fell from 4 to 2 as the 60-minute TTLs ran out). The Mac slept and woke at least three times; each time it reconnected to the relay and re-established the relayed connection to the hotspot within about 10 s.
 
 ## Open items from the run
 
-- Hole punching untested: both roosts were behind the same NAT. Needs a roost on a second home network.
-- Roost-to-roost connection relies on presence-driven dialing plus the relay. The alternative is public nodes relaying room topics; decide when the second home network is available.
+- Hole punching untested: both stations were behind the same NAT. Needs a station on a second home network.
+- Station-to-station connection relies on presence-driven dialing plus the circuit relay. The alternative is public stations relaying room topics; decide when the second home network is available.
 - The delivered-once table is in memory; a restart replays messages within the replay window that have no DELIVERED receipt (seen once during the run). Native clients dedup by ID; it is the spec's stated behaviour for legacy radios.
 - `N0CALL` placeholder device on B; replace with a real second callsign for any on-air test.
 
 ## Decision: does libp2p earn its weight?
 
-Yes, on this evidence. What it cost on the Pi Zero 2 W: 28 MB of RSS, no measurable CPU, about 16 MB of free memory, and a 26 MB binary, alongside a gateway already running a software modem on two cores. What it gave for free: TLS-authenticated transport, peer identity from the node key, NAT traversal through a relay with hole punching available, gossipsub for presence and rooms, and a DHT ready for inbox records. The bugs found during the run were all in roost's use of those pieces (reconnection, dialing, presence timing), not in the pieces themselves. The remaining risk is the untested hole-punching path between two different NATs, which does not change the decision because the relay path works and its cost is the public node's bandwidth.
+Yes, on this evidence. What it cost on the Pi Zero 2 W: 28 MB of RSS, no measurable CPU, about 16 MB of free memory, and a 26 MB binary, alongside a gateway already running a software modem on two cores. What it gave for free: TLS-authenticated transport, peer identity from the node key, NAT traversal through a circuit relay with hole punching available, gossipsub for presence and rooms, and a DHT ready for mailbox records. The bugs found during the run were all in station's use of those pieces (reconnection, dialing, presence timing), not in the pieces themselves. The remaining risk is the untested hole-punching path between two different NATs, which does not change the decision because the circuit relay path works and its cost is the public station's bandwidth.

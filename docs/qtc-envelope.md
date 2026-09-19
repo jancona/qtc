@@ -1,18 +1,19 @@
-# Pigeon: Message Envelope
+# QTC: Message Envelope
 
-*Part of Pigeon: An M17 Messaging System*
+*Part of QTC: An M17 Messaging System*
 
 **Status:** Draft 0.1 — for discussion
 **Scope:** Client ↔ node message and receipt packet types
 
 ## Terminology
 
-This document is part of **Pigeon: An M17 Messaging System**. Throughout the Pigeon specifications:
+This document is part of **QTC: An M17 Messaging System**. Throughout the QTC specifications:
 
-- **Node** is the generic term for the store-and-forward daemon that sits between clients or radios and the rest of the network. The reference implementation is called **roost**, by analogy to where a bird spends the night: wherever it happens to be, not a fixed home. A callsign may have several nodes at once.
-- **Home node** for a callsign means any node that has heard it and is holding state for it. It does not imply registration or permanence.
-- **Public node** is a node with a reachable address that also relays for nodes behind NAT and serves internet-only clients.
-- **Clock-in** is the informal name for a delivery receipt (RCPT), after the timing clock that records a racing pigeon's return.
+- **Node** is the generic term for the store-and-forward daemon that sits between clients or radios and the rest of the network. The reference implementation is called **qtcd**. QTC is the Q-code for "I have messages for you."
+- **Station** for a callsign means any node that has heard it and is holding state for it. It does not imply registration or permanence. A callsign may have several stations at once.
+- **Public station** is a station with a reachable address. It typically also provides circuit relay for stations behind NAT, hosts mailboxes, and serves internet-only clients; `relay` is one of its capabilities, not a synonym for it.
+- **QSL** is the informal name for a delivery receipt (RCPT).
+- A client asking its station for waiting messages is, informally, **QRU?**
 
 ## 1. Purpose
 
@@ -27,7 +28,7 @@ The existing SMS type (0x05) remains valid. Nodes translate between SMS and MSG 
 
 ## 2. Conventions
 
-- See Terminology above for node, home node, and public node.
+- See Terminology above for node, station, and public station.
 - All multi-byte integers are big-endian.
 - "Callsign" means a 48-bit M17 base-40 encoded address as defined in the M17 specification.
 - "Room" means an address in the M17 Extended address range (`0xEE6B28000000`–`0xFFFFFFFFFFFE`, which the M17 specification sets aside for application use). How room names are encoded into that range is defined in the Rooms specification.
@@ -41,7 +42,7 @@ The existing SMS type (0x05) remains valid. Nodes translate between SMS and MSG 
 | MSG  | `0x08` | Text message envelope (§4) |
 | RCPT | `0x09` | Message receipt (§5) |
 
-These values are provisional. The M17 specification assigns `0x00`–`0x06`, and the 3.0.0 draft assigns `0x07` (TLE); `0x08` and `0x09` are the next unassigned values and will be proposed to the M17 working group once the design is further along. Implementations should keep the values easy to change until then. The M17 packet type specifier is formally a UTF-8-style variable-length integer; values below 128 occupy one byte, so all Pigeon types are single bytes.
+These values are provisional. The M17 specification assigns `0x00`–`0x06`, and the 3.0.0 draft assigns `0x07` (TLE); `0x08` and `0x09` are the next unassigned values and will be proposed to the M17 working group once the design is further along. Implementations should keep the values easy to change until then. The M17 packet type specifier is formally a UTF-8-style variable-length integer; values below 128 occupy one byte, so all QTC types are single bytes.
 
 ## 4. MSG — Message Envelope
 
@@ -143,7 +144,7 @@ A MSG whose Destination is a room is delivered to every client subscribed to tha
 
 | Value  | Name        | Issued by | Meaning |
 |-------:|-------------|-----------|---------|
-| `0x00` | QUEUED      | Node      | The sender's node reports that the message has been accepted for store-and-forward (at least one inbox member has stored it). Sent at most once, by the sender's node; inbox nodes never issue receipts. |
+| `0x00` | QUEUED      | Node      | The sender's node reports that the message has been accepted for store-and-forward (at least one mailbox member has stored it). Sent at most once, by the sender's node; mailbox nodes never issue receipts. |
 | `0x01` | TRANSMITTED | Node      | The message was transmitted on RF, or sent to a legacy client, toward the recipient. Receipt is not confirmed. Last heard indicates how recently the recipient was active at this node. |
 | `0x02` | DELIVERED   | Client    | The recipient's client received the message. Never issued by a node. |
 | `0x03` | —           | —         | Reserved for a future READ status. |
@@ -200,7 +201,7 @@ Offset  Bytes                          Field
 23      48 69 20 4A 69 6D ...          Body: "Hi Jim, testing the new envelope."
 ```
 
-The message ID is `SHA-256(00 02 0000018A92AE 0000001680B7 6AA3ED40 05A0 3C7F "Hi Jim, …")[0:8]` = `CBA5C5C74EAEBF72`. This example, with many others, is in `pigeon-fixtures.json`; all values there are generated by an independent reference implementation (`pigeon-fixtures-gen.py`).
+The message ID is `SHA-256(00 02 0000018A92AE 0000001680B7 6AA3ED40 05A0 3C7F "Hi Jim, …")[0:8]` = `CBA5C5C74EAEBF72`. This example, with many others, is in `qtc-fixtures.json`; all values there are generated by an independent reference implementation (`qtc-fixtures-gen.py`).
 
 If W1AW's home node sent the message to a legacy radio, it would issue a TRANSMITTED receipt with Source = the node's callsign, Destination = N1ADJ, that Message ID, Status `0x01`, the node's timestamp, and W1AW's last-heard time. If instead W1AW's client speaks MSG, it would issue DELIVERED (`0x02`) with Source = W1AW.
 

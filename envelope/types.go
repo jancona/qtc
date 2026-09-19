@@ -1,6 +1,6 @@
-// Package envelope implements the Pigeon message envelope: the MSG and RCPT
-// packet types from docs/pigeon-envelope.md and the ROOM control packet from
-// docs/pigeon-rooms.md §5.
+// Package envelope implements the QTC message envelope: the MSG and RCPT
+// packet types from docs/qtc-envelope.md and the ROOM control packet from
+// docs/qtc-rooms.md §5.
 //
 // An Envelope is an immutable byte string. It is parsed once, validated, and
 // then read through accessors; nothing here rebuilds an envelope from fields,
@@ -11,7 +11,7 @@
 // The package is standard library only.
 package envelope
 
-// PacketType is the M17 packet mode type byte. Pigeon's values are
+// PacketType is the M17 packet mode type byte. QTC's values are
 // provisional (envelope spec §3) and are kept here, in one place, so they are
 // easy to change. 0x07 is TLE in M17 3.0.0 and must not be used.
 type PacketType byte

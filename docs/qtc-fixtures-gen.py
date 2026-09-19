@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Generate Pigeon test fixtures.
+"""Generate QTC test fixtures.
 
-This is an independent reference implementation of the Pigeon Message
+This is an independent reference implementation of the QTC Message
 Envelope and Rooms encodings, used to produce fixtures that the Go
 implementation (and any other, e.g. OpenRTX) must reproduce exactly.
 
 Everything here follows:
   - M17 Specification (spec.m17project.org), address encoding appendix
-  - Pigeon: Message Envelope, draft 0.1
-  - Pigeon: Rooms, draft 0.1
+  - QTC: Message Envelope, draft 0.1
+  - QTC: Rooms, draft 0.1
 """
 import hashlib, json, os, struct
 
@@ -129,7 +129,7 @@ def hx(b: bytes) -> str:
 
 def main():
     fx = {
-        "pigeon_fixtures_version": 2,
+        "qtc_fixtures_version": 3,
         "notes": [
             "All byte strings are lowercase hex. All integers are decimal.",
             "Packet types are provisional (Envelope spec §3).",
@@ -322,7 +322,7 @@ def main():
     ]
 
     os.makedirs("/mnt/user-data/outputs", exist_ok=True)
-    with open("/mnt/user-data/outputs/pigeon-fixtures.json", "w") as f:
+    with open("/mnt/user-data/outputs/qtc-fixtures.json", "w") as f:
         json.dump(fx, f, indent=2, ensure_ascii=False)
     print("ok", len(fx["envelopes"]), "envelopes")
     # sanity against hand-computed values in the envelope spec example

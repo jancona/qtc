@@ -14,13 +14,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jancona/pigeon/envelope"
+	"github.com/jancona/qtc/envelope"
 )
 
-// fixtures mirrors docs/pigeon-fixtures.json. Sections the envelope package
+// fixtures mirrors docs/qtc-fixtures.json. Sections the envelope package
 // does not implement are left out.
 type fixtures struct {
-	Version     int               `json:"pigeon_fixtures_version"`
+	Version     int               `json:"qtc_fixtures_version"`
 	PacketTypes map[string]int    `json:"packet_types"`
 	Flags       map[string]int    `json:"flags"`
 	RcptStatus  map[string]int    `json:"rcpt_status"`
@@ -120,7 +120,7 @@ type invalidFixture struct {
 
 func loadFixtures(t *testing.T) *fixtures {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join("..", "docs", "pigeon-fixtures.json"))
+	b, err := os.ReadFile(filepath.Join("..", "docs", "qtc-fixtures.json"))
 	if err != nil {
 		t.Fatalf("read fixtures: %v", err)
 	}
@@ -128,8 +128,8 @@ func loadFixtures(t *testing.T) *fixtures {
 	if err := json.Unmarshal(b, &fx); err != nil {
 		t.Fatalf("parse fixtures: %v", err)
 	}
-	if fx.Version != 2 {
-		t.Fatalf("fixtures version %d, test written for 2", fx.Version)
+	if fx.Version != 3 {
+		t.Fatalf("fixtures version %d, test written for 3", fx.Version)
 	}
 	return &fx
 }

@@ -1,13 +1,13 @@
-package roost
+package qtcd
 
 import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/jancona/pigeon/envelope"
+	"github.com/jancona/qtc/envelope"
 )
 
-// Minimal M17_inet framing for the client face: just enough to relay
+// Minimal M17_inet framing for the client face: just enough to forward
 // datagrams, read source and destination addresses, and build SMS packets.
 // Kept local rather than importing github.com/jancona/m17, whose root
 // package links modem, audio, serial, and ZeroMQ dependencies.
@@ -77,7 +77,7 @@ type packetFrame struct {
 }
 
 // parsePacketDatagram parses an "M17P" datagram. The packet type is read
-// as a single byte; Pigeon's and SMS's types are all below 0x80.
+// as a single byte; QTC's and SMS's types are all below 0x80.
 func parsePacketDatagram(b []byte) (packetFrame, error) {
 	var f packetFrame
 	if len(b) < 4+lsfLen+1+2 {

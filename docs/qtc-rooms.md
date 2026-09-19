@@ -1,19 +1,20 @@
-# Pigeon: Rooms
+# QTC: Rooms
 
-*Part of Pigeon: An M17 Messaging System*
+*Part of QTC: An M17 Messaging System*
 
 **Status:** Draft 0.1 — for discussion
 **Scope:** Room addressing, subscription semantics, and the client ↔ node control packet type
-**Depends on:** Pigeon: Architecture Overview; Pigeon: Message Envelope (MSG/RCPT)
+**Depends on:** QTC: Architecture Overview; QTC: Message Envelope (MSG/RCPT)
 
 ## Terminology
 
-This document is part of **Pigeon: An M17 Messaging System**. Throughout the Pigeon specifications:
+This document is part of **QTC: An M17 Messaging System**. Throughout the QTC specifications:
 
-- **Node** is the generic term for the store-and-forward daemon that sits between clients or radios and the rest of the network. The reference implementation is called **roost**, by analogy to where a bird spends the night: wherever it happens to be, not a fixed home. A callsign may have several nodes at once.
-- **Home node** for a callsign means any node that has heard it and is holding state for it. It does not imply registration or permanence.
-- **Public node** is a node with a reachable address that also relays for nodes behind NAT and serves internet-only clients.
-- **Clock-in** is the informal name for a delivery receipt (RCPT), after the timing clock that records a racing pigeon's return.
+- **Node** is the generic term for the store-and-forward daemon that sits between clients or radios and the rest of the network. The reference implementation is called **qtcd**. QTC is the Q-code for "I have messages for you."
+- **Station** for a callsign means any node that has heard it and is holding state for it. It does not imply registration or permanence. A callsign may have several stations at once.
+- **Public station** is a station with a reachable address. It typically also provides circuit relay for stations behind NAT, hosts mailboxes, and serves internet-only clients; `relay` is one of its capabilities, not a synonym for it.
+- **QSL** is the informal name for a delivery receipt (RCPT).
+- A client asking its station for waiting messages is, informally, **QRU?**
 
 ## 1. Model
 
@@ -63,7 +64,7 @@ A room whose name is a node's callsign with its module suffix removed (the base-
 
 ### 4.1 State
 
-A subscription is a tuple `(callsign, room, last-refreshed)`. A node that processes a join or leave records it by storing a ROOM envelope in the callsign's inbox (Node Protocol §9), so any node that later homes the callsign learns its rooms from its inbox sweep. Membership of public rooms is therefore visible to anyone who can read the inbox, which in this version is everyone.
+A subscription is a tuple `(callsign, room, last-refreshed)`. A node that processes a join or leave records it by storing a ROOM envelope in the callsign's mailbox (Node Protocol §9), so any node that later homes the callsign learns its rooms from its mailbox sweep. Membership of public rooms is therefore visible to anyone who can read the mailbox, which in this version is everyone.
 
 Opt-outs (§4.3) are likewise derived from the latest ROOM envelope per room, so they follow the callsign between nodes.
 
@@ -85,7 +86,7 @@ The opt-out prevents auto-subscription from re-adding the callsign. It is cleare
 
 ### 4.4 Auto-Subscription
 
-When a node hears a callsign on its RF side or from a directly connected client, it subscribes that callsign to its own node-callsign room unless an opt-out exists. Nodes must not auto-subscribe callsigns to any other room. Auto-subscriptions are node-local and are never stored in the inbox; only an explicit or implicit join to the local room is.
+When a node hears a callsign on its RF side or from a directly connected client, it subscribes that callsign to its own node-callsign room unless an opt-out exists. Nodes must not auto-subscribe callsigns to any other room. Auto-subscriptions are node-local and are never stored in the mailbox; only an explicit or implicit join to the local room is.
 
 ### 4.5 Expiry
 
@@ -95,7 +96,7 @@ A room with no live subscriptions anywhere has no state anywhere and needs no cl
 
 ### 4.6 Multiple Home Nodes
 
-A callsign heard at several nodes has its subscriptions applied at each, all derived from the same inbox contents. The latest ROOM envelope per room wins, and on equal timestamps LEAVE wins, since the sticky opt-out is the conservative outcome and clock-less radios receive node-substituted times; a LEAVE is a ROOM envelope like any other, so every node homing the callsign sees it after its next sweep and records the opt-out.
+A callsign heard at several nodes has its subscriptions applied at each, all derived from the same mailbox contents. The latest ROOM envelope per room wins, and on equal timestamps LEAVE wins, since the sticky opt-out is the conservative outcome and clock-less radios receive node-substituted times; a LEAVE is a ROOM envelope like any other, so every node homing the callsign sees it after its next sweep and records the opt-out.
 
 ## 5. ROOM — Control Packet
 
@@ -116,7 +117,7 @@ Clients that speak the new protocol manage subscriptions with a dedicated packet
 
 The layout is the same for requests and replies. Requests never carry a note.
 
-The timestamp is what orders subscription state when a callsign's JOIN and LEAVE requests are stored in its inbox (Node Protocol §9): the latest per room wins. ROOM packets are not content-addressed, and no signature is defined for them in this version, so a node storing a request whose timestamp is `0` substitutes its own receipt time before storing it (rebuilding the packet from its fields; this is the one place a node produces a modified copy of what it received). The Flags byte exists so that a later version can sign stored JOIN/LEAVE records without changing the layout; once signatures exist, timestamp substitution will not be possible for signed requests and they will need a clock.
+The timestamp is what orders subscription state when a callsign's JOIN and LEAVE requests are stored in its mailbox (Node Protocol §9): the latest per room wins. ROOM packets are not content-addressed, and no signature is defined for them in this version, so a node storing a request whose timestamp is `0` substitutes its own receipt time before storing it (rebuilding the packet from its fields; this is the one place a node produces a modified copy of what it received). The Flags byte exists so that a later version can sign stored JOIN/LEAVE records without changing the layout; once signatures exist, timestamp substitution will not be possible for signed requests and they will need a clock.
 
 ### 5.2 Ops
 
@@ -132,7 +133,7 @@ A node replies to every request. A reply to JOIN or LEAVE carries no rooms on su
 
 ### 5.3 Rules
 
-- A node stores each accepted JOIN or LEAVE request, as received (with timestamp filled if it was `0`), in the requesting callsign's inbox so that other nodes homing the callsign apply the same subscription state.
+- A node stores each accepted JOIN or LEAVE request, as received (with timestamp filled if it was `0`), in the requesting callsign's mailbox so that other nodes homing the callsign apply the same subscription state.
 - A node must refuse JOIN for addresses outside the valid room range (§3.2) or that it has been configured not to carry.
 - LEAVE for a room the callsign is not in succeeds and still records the opt-out.
 - Control packets carry no message ID and generate no receipts.
@@ -169,7 +170,7 @@ A home node queues a room message for each of its subscribed callsigns exactly a
 
 ### 7.3 Backlog
 
-When a callsign joins a room at a node that holds no history for it, the node may query a room archive (a public node subscribed to the room that stores its messages; Node Protocol §9) for messages still within TTL. Duplicates are discarded by message ID.
+When a callsign joins a room at a node that holds no history for it, the node may query a room archive (a public station subscribed to the room that stores its messages; Node Protocol §9) for messages still within TTL. Duplicates are discarded by message ID.
 
 ### 7.4 RF
 
@@ -187,7 +188,7 @@ No receipts are generated for room messages except REJECTED, per the Message Env
 
 ## 9. Resolved
 
-- **Subscription state** is stored as ROOM envelopes in the callsign's inbox and applied by every node that homes it; room fan-out is a gossipsub topic per room.
+- **Subscription state** is stored as ROOM envelopes in the callsign's mailbox and applied by every node that homes it; room fan-out is a gossipsub topic per room.
 - **Rooms are subscription-only,** with no ownership or explicit lifecycle.
 - **Implicit join on send.** Sending to a room subscribes the sender; the node stores a synthesized ROOM JOIN so state stays ROOM-only.
 - **Ordering.** Latest ROOM envelope per room wins; LEAVE wins ties.

@@ -253,7 +253,7 @@ func (e *Envelope) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// StoreID is the key under which an inbox stores the envelope (node protocol
+// StoreID is the key under which a mailbox stores the envelope (node protocol
 // §5): the message ID for a MSG, and for RCPT and ROOM, which have no ID of
 // their own, the first 8 bytes of SHA-256 over the envelope bytes.
 func (e *Envelope) StoreID() ID {

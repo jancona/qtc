@@ -1,17 +1,17 @@
-package roost
+package qtcd
 
 import (
 	"sync"
 	"time"
 
-	"github.com/jancona/pigeon/envelope"
+	"github.com/jancona/qtc/envelope"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
 
 // roomTopics keeps a gossipsub topic joined for every room with a local
 // subscriber (rooms spec §7.1, node protocol §9).
 type roomTopics struct {
-	r  *Roost
+	r  *Station
 	mu sync.Mutex
 	// joined maps room address to its topic and subscription.
 	joined map[envelope.Address]*roomTopic
@@ -22,7 +22,7 @@ type roomTopic struct {
 	sub   *pubsub.Subscription
 }
 
-func newRoomTopics(r *Roost) *roomTopics {
+func newRoomTopics(r *Station) *roomTopics {
 	return &roomTopics{r: r, joined: map[envelope.Address]*roomTopic{}}
 }
 
@@ -121,7 +121,7 @@ func (rt *roomTopics) receive(room envelope.Address, sub *pubsub.Subscription) {
 
 // markSeenRoomMsg dedups room messages by ID using the delivery table with
 // the room address standing in for a device.
-func (r *Roost) markSeenRoomMsg(e *envelope.Envelope) bool {
+func (r *Station) markSeenRoomMsg(e *envelope.Envelope) bool {
 	return r.markDelivered(e, e.Destination())
 }
 

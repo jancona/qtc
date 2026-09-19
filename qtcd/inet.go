@@ -1,4 +1,4 @@
-package roost
+package qtcd
 
 import (
 	"bytes"
@@ -11,20 +11,20 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jancona/pigeon/envelope"
+	"github.com/jancona/qtc/envelope"
 )
 
-// The client face (node protocol §10): the roost presents itself as one
+// The client face (node protocol §10): the station presents itself as one
 // M17_inet reflector. Each module letter maps to an upstream reflector and
-// module plus a mode. Native modules are a pure proxy; pigeon modules take
-// messaging into Pigeon and never forward it.
+// module plus a mode. Native modules are a pure proxy; qtc modules take
+// messaging into QTC and never forward it.
 
 // ModuleMode is a module's messaging mode.
 type ModuleMode string
 
 const (
 	ModeNative ModuleMode = "native"
-	ModePigeon ModuleMode = "pigeon"
+	ModeQTC    ModuleMode = "qtc"
 )
 
 // ModuleConfig maps one of this node's modules to an upstream.
@@ -54,7 +54,7 @@ type InetConfig struct {
 	SessionTimeout time.Duration
 }
 
-// inetCore is what the client face needs from the roost, kept small so the
+// inetCore is what the client face needs from the station, kept small so the
 // face can be tested against a stub.
 type inetCore interface {
 	inetHeard(device envelope.Address, via Via, now uint32) error
@@ -66,16 +66,18 @@ type inetCore interface {
 	inetLog() *slog.Logger
 }
 
-// Roost implements inetCore.
-func (r *Roost) inetHeard(d envelope.Address, via Via, now uint32) error { return r.Heard(d, via, now) }
-func (r *Roost) inetSend(e *envelope.Envelope) error                     { return r.Send(e) }
-func (r *Roost) inetRoom(d envelope.Address, req *envelope.Envelope) (*envelope.Envelope, error) {
+// Station implements inetCore.
+func (r *Station) inetHeard(d envelope.Address, via Via, now uint32) error {
+	return r.Heard(d, via, now)
+}
+func (r *Station) inetSend(e *envelope.Envelope) error { return r.Send(e) }
+func (r *Station) inetRoom(d envelope.Address, req *envelope.Envelope) (*envelope.Envelope, error) {
 	return r.HandleRoom(d, req)
 }
-func (r *Roost) inetCallsign() envelope.Address  { return r.callsign }
-func (r *Roost) inetLocalRoom() envelope.Address { return r.subs.LocalRoom() }
-func (r *Roost) inetDefaultTTL() uint16          { return r.cfg.DefaultTTL }
-func (r *Roost) inetLog() *slog.Logger           { return r.log }
+func (r *Station) inetCallsign() envelope.Address  { return r.callsign }
+func (r *Station) inetLocalRoom() envelope.Address { return r.subs.LocalRoom() }
+func (r *Station) inetDefaultTTL() uint16          { return r.cfg.DefaultTTL }
+func (r *Station) inetLog() *slog.Logger           { return r.log }
 
 type inetFace struct {
 	core     inetCore
@@ -86,7 +88,7 @@ type inetFace struct {
 
 	mu       sync.Mutex
 	sessions map[string]*inetSession           // by client address
-	devices  map[envelope.Address]*inetSession // device -> pigeon-mode session that heard it
+	devices  map[envelope.Address]*inetSession // device -> qtc-mode session that heard it
 	wg       sync.WaitGroup
 	ctx      context.Context
 	cancel   context.CancelFunc
@@ -98,7 +100,7 @@ type inetSession struct {
 	callsign envelope.Address
 	module   byte
 	mod      ModuleConfig
-	pigeon   bool
+	qtcMode  bool
 	via      Via
 	up       *net.UDPConn
 
@@ -128,7 +130,7 @@ func newInetFace(core inetCore, cfg InetConfig) (*inetFace, error) {
 		cfg.Gateways = defaultGatewayNets()
 	}
 	if len(cfg.Modules) == 0 {
-		return nil, errors.New("roost: inet: no modules configured")
+		return nil, errors.New("qtcd: inet: no modules configured")
 	}
 	var hosts map[string]reflectorHost
 	f := &inetFace{
@@ -141,19 +143,19 @@ func newInetFace(core inetCore, cfg InetConfig) (*inetFace, error) {
 	}
 	for letter, m := range cfg.Modules {
 		if letter < 'A' || letter > 'Z' {
-			return nil, fmt.Errorf("roost: inet: module %q is not A-Z", letter)
+			return nil, fmt.Errorf("qtcd: inet: module %q is not A-Z", letter)
 		}
-		if m.Mode != ModeNative && m.Mode != ModePigeon {
-			return nil, fmt.Errorf("roost: inet: module %c: mode must be native or pigeon", letter)
+		if m.Mode != ModeNative && m.Mode != ModeQTC {
+			return nil, fmt.Errorf("qtcd: inet: module %c: mode must be native or qtc", letter)
 		}
 		if m.Module < 'A' || m.Module > 'Z' {
-			return nil, fmt.Errorf("roost: inet: module %c: upstream module %q is not A-Z", letter, m.Module)
+			return nil, fmt.Errorf("qtcd: inet: module %c: upstream module %q is not A-Z", letter, m.Module)
 		}
 		addr := m.Reflector
 		if !strings.Contains(addr, ":") {
 			if hosts == nil {
 				if cfg.HostsFile == "" {
-					return nil, fmt.Errorf("roost: inet: module %c names reflector %q but no hosts file is configured", letter, m.Reflector)
+					return nil, fmt.Errorf("qtcd: inet: module %c names reflector %q but no hosts file is configured", letter, m.Reflector)
 				}
 				var err error
 				if hosts, err = loadHostsFile(cfg.HostsFile); err != nil {
@@ -162,23 +164,23 @@ func newInetFace(core inetCore, cfg InetConfig) (*inetFace, error) {
 			}
 			h, ok := hosts[strings.ToUpper(m.Reflector)]
 			if !ok {
-				return nil, fmt.Errorf("roost: inet: module %c: reflector %q not in %s", letter, m.Reflector, cfg.HostsFile)
+				return nil, fmt.Errorf("qtcd: inet: module %c: reflector %q not in %s", letter, m.Reflector, cfg.HostsFile)
 			}
 			addr = h.Addr
 		}
 		ua, err := net.ResolveUDPAddr("udp", addr)
 		if err != nil {
-			return nil, fmt.Errorf("roost: inet: module %c: upstream %q: %w", letter, addr, err)
+			return nil, fmt.Errorf("qtcd: inet: module %c: upstream %q: %w", letter, addr, err)
 		}
 		f.upstream[letter] = ua
 	}
 	la, err := net.ResolveUDPAddr("udp", cfg.Listen)
 	if err != nil {
-		return nil, fmt.Errorf("roost: inet: listen %q: %w", cfg.Listen, err)
+		return nil, fmt.Errorf("qtcd: inet: listen %q: %w", cfg.Listen, err)
 	}
 	f.conn, err = net.ListenUDP("udp", la)
 	if err != nil {
-		return nil, fmt.Errorf("roost: inet: listen: %w", err)
+		return nil, fmt.Errorf("qtcd: inet: listen: %w", err)
 	}
 	return f, nil
 }
@@ -280,7 +282,7 @@ func (f *inetFace) handleClient(b []byte, addr *net.UDPAddr) {
 		s.close(false)
 		f.mu.Unlock()
 	case magicM17S:
-		if _, src, ok := streamAddrs(b); ok && s.pigeon {
+		if _, src, ok := streamAddrs(b); ok && s.qtcMode {
 			s.heard(src)
 		}
 		s.forwardUp(b)
@@ -292,7 +294,7 @@ func (f *inetFace) handleClient(b []byte, addr *net.UDPAddr) {
 }
 
 // connect handles CONN or LSTN: NACK for an unmapped module, otherwise open
-// the upstream and relay the request with the upstream module letter.
+// the upstream and forward the request with the upstream module letter.
 func (f *inetFace) connect(b []byte, addr *net.UDPAddr) {
 	if len(b) != 11 {
 		f.send(addr, controlDatagram(magicNACK, f.core.inetCallsign()))
@@ -317,7 +319,7 @@ func (f *inetFace) connect(b []byte, addr *net.UDPAddr) {
 		callsign: envelope.AddressFromBytes(b[4:10]),
 		module:   module,
 		mod:      mod,
-		pigeon:   mod.Mode == ModePigeon,
+		qtcMode:  mod.Mode == ModeQTC,
 		via:      f.via(addr.IP),
 		up:       up,
 		last:     time.Now(),
@@ -374,7 +376,7 @@ func (s *inetSession) close(disc bool) {
 	}
 }
 
-// heard publishes presence for a device seen on a pigeon module, at most
+// heard publishes presence for a device seen on a qtc module, at most
 // once per heardRateLimit per device, and remembers the session for
 // delivery.
 func (s *inetSession) heard(device envelope.Address) {
@@ -405,14 +407,14 @@ func (s *inetSession) clientPacket(b []byte) {
 		s.forwardUp(b)
 		return
 	}
-	if s.pigeon {
+	if s.qtcMode {
 		s.heard(pf.src)
 	}
 	switch pf.typ {
 	case envelope.TypeMSG, envelope.TypeRCPT, envelope.TypeROOM:
 		s.ingestEnvelope(pf)
 	case envelope.TypeSMS:
-		if s.pigeon {
+		if s.qtcMode {
 			s.ingestSMS(pf)
 		} else {
 			s.forwardUp(b)
@@ -422,7 +424,7 @@ func (s *inetSession) clientPacket(b []byte) {
 	}
 }
 
-// ingestEnvelope takes a native Pigeon packet into the roost.
+// ingestEnvelope takes a native QTC packet into the station.
 func (s *inetSession) ingestEnvelope(pf packetFrame) {
 	e, err := envelope.Parse(pf.payload)
 	if err != nil {
@@ -485,7 +487,7 @@ func (s *inetSession) ingestSMS(pf packetFrame) {
 func (s *inetSession) roomCommand(device envelope.Address, text string) string {
 	op, rooms, err := ParseRoomCommand(text)
 	if err != nil {
-		return "error: " + strings.TrimPrefix(err.Error(), "roost: ")
+		return "error: " + strings.TrimPrefix(err.Error(), "qtcd: ")
 	}
 	req, err := envelope.BuildRoom(op, uint32(time.Now().Unix()), rooms, "")
 	if err != nil {
@@ -493,7 +495,7 @@ func (s *inetSession) roomCommand(device envelope.Address, text string) string {
 	}
 	reply, err := s.face.core.inetRoom(device, req)
 	if err != nil {
-		return "error: " + strings.TrimPrefix(err.Error(), "roost: ")
+		return "error: " + strings.TrimPrefix(err.Error(), "qtcd: ")
 	}
 	rr, _ := reply.Room()
 	names := func(as []envelope.Address) string {
@@ -528,8 +530,8 @@ func (s *inetSession) replySMS(device envelope.Address, text string) {
 	s.face.send(s.client, buildPacketDatagram(device, s.face.core.inetCallsign(), payload))
 }
 
-// readUpstream relays reflector traffic to the client, dropping messaging
-// packets on pigeon modules.
+// readUpstream forwards reflector traffic to the client, dropping messaging
+// packets on qtc modules.
 func (s *inetSession) readUpstream() {
 	defer s.face.wg.Done()
 	buf := make([]byte, 2048)
@@ -542,11 +544,11 @@ func (s *inetSession) readUpstream() {
 		if len(b) < 4 {
 			continue
 		}
-		if s.pigeon && string(b[:4]) == magicM17P {
+		if s.qtcMode && string(b[:4]) == magicM17P {
 			if pf, err := parsePacketDatagram(b); err == nil {
 				switch pf.typ {
 				case envelope.TypeSMS, envelope.TypeMSG, envelope.TypeRCPT, envelope.TypeROOM:
-					s.face.log.Debug("dropping upstream messaging packet on pigeon module", "type", pf.typ, "src", pf.src)
+					s.face.log.Debug("dropping upstream messaging packet on qtc module", "type", pf.typ, "src", pf.src)
 					continue
 				}
 			}

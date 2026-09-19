@@ -1,19 +1,20 @@
-# Pigeon: Node Protocol
+# QTC: Node Protocol
 
-*Part of Pigeon: An M17 Messaging System*
+*Part of QTC: An M17 Messaging System*
 
 **Status:** Draft 0.1 — for discussion
 **Scope:** Node ↔ node transport, identity, peering, gossip, delivery, and backlog
-**Depends on:** Pigeon: Message Envelope (MSG/RCPT); Pigeon: Rooms
+**Depends on:** QTC: Message Envelope (MSG/RCPT); QTC: Rooms
 
 ## Terminology
 
-This document is part of **Pigeon: An M17 Messaging System**. Throughout the Pigeon specifications:
+This document is part of **QTC: An M17 Messaging System**. Throughout the QTC specifications:
 
-- **Node** is the generic term for the store-and-forward daemon that sits between clients or radios and the rest of the network. The reference implementation is called **roost**, by analogy to where a bird spends the night: wherever it happens to be, not a fixed home. A callsign may have several nodes at once.
-- **Home node** for a callsign means any node that has heard it and is holding state for it. It does not imply registration or permanence.
-- **Public node** is a node with a reachable address that also relays for nodes behind NAT and serves internet-only clients.
-- **Clock-in** is the informal name for a delivery receipt (RCPT), after the timing clock that records a racing pigeon's return.
+- **Node** is the generic term for the store-and-forward daemon that sits between clients or radios and the rest of the network. The reference implementation is called **qtcd**. QTC is the Q-code for "I have messages for you."
+- **Station** for a callsign means any node that has heard it and is holding state for it. It does not imply registration or permanence. A callsign may have several stations at once.
+- **Public station** is a station with a reachable address. It typically also provides circuit relay for stations behind NAT, hosts mailboxes, and serves internet-only clients; `relay` is one of its capabilities, not a synonym for it.
+- **QSL** is the informal name for a delivery receipt (RCPT).
+- A client asking its station for waiting messages is, informally, **QRU?**
 
 Additional terms used here:
 
@@ -37,7 +38,7 @@ This document defines how nodes find each other, authenticate, share the state n
 
 Nodes communicate over TCP. Every connection is wrapped in TLS 1.3 with mutual authentication: both sides present a certificate, and both verify the other's as described in §4. Plaintext node connections are not permitted in any version of this protocol.
 
-The default listening port is **17700** (provisional). Public nodes listen; nodes behind NAT do not need to.
+The default listening port is **17700** (provisional). Public stations listen; nodes behind NAT do not need to.
 
 TLS provides authentication and integrity on the link. It does not provide message confidentiality: message content is plaintext at every node and on RF, as required for amateur traffic.
 
@@ -111,7 +112,7 @@ This gives every claim in the protocol an accountable origin. It does not, in th
 
 ### 5.1 Topology
 
-Every node maintains outbound connections to a small number of peers (default 3, configurable). Public nodes additionally accept inbound connections, up to a configured limit. A NATed node's peers are necessarily public nodes; a public node's peers may be anything.
+Every node maintains outbound connections to a small number of peers (default 3, configurable). Public stations additionally accept inbound connections, up to a configured limit. A NATed node's peers are necessarily public stations; a public station's peers may be anything.
 
 The resulting graph is unstructured. Gossip (§6) floods over it with deduplication, and delivery (§7) routes over it using the reachability information gossip provides. No spanning tree is maintained.
 
@@ -123,7 +124,7 @@ Sent by both sides immediately after the TLS handshake. No other message may pre
 |----:|---------------|---------|
 | 1   | uint          | Protocol version; this document is version 0 |
 | 2   | bytes(6)      | Node callsign |
-| 3   | uint          | Capability flags: bit 0 = accepts inbound (public), bit 1 = relays for others, bit 2 = serves M17_inet clients |
+| 3   | uint          | Capability flags: bit 0 = accepts inbound (public), bit 1 = provides circuit relay for others, bit 2 = serves M17_inet clients |
 | 4   | array of text | Listen addresses (`host:port`), present only if public |
 | 5   | bytes(32)     | Epoch: random value chosen at node start (§6.3) |
 | 6   | uint          | Current time at sender |
@@ -133,11 +134,11 @@ A node receiving a HELLO with an unsupported version replies ERROR code 2 and cl
 
 ### 5.3 Bootstrap
 
-A node with no known peers obtains seeds from, in order: its configuration file; DNS TXT records at a configured seed name (format: `v=pigeon0; addr=host:port; id=<hex node ID>`, one record per seed); and any PEERS messages it has cached from previous runs. Seed lists are a convenience, not an authority: a seed is just a public node somebody wrote down.
+A node with no known peers obtains seeds from, in order: its configuration file; DNS TXT records at a configured seed name (format: `v=qtc0; addr=host:port; id=<hex node ID>`, one record per seed); and any PEERS messages it has cached from previous runs. Seed lists are a convenience, not an authority: a seed is just a public station somebody wrote down.
 
 ### 5.4 PEERS
 
-A list of public nodes the sender knows about, sent after HELLO and thereafter whenever the sender's view changes substantially, at most once per minute.
+A list of public stations the sender knows about, sent after HELLO and thereafter whenever the sender's view changes substantially, at most once per minute.
 
 | Key | Type  | Meaning |
 |----:|-------|---------|
@@ -204,7 +205,7 @@ Published by any node holding custody of undelivered unicast messages for a call
 | 30  | bytes(6)      | Node callsign |
 | 31  | uint          | Capability flags, as in HELLO |
 | 32  | array of text | Listen addresses, if public |
-| 33  | array of bytes(32) | Via: node IDs of the public nodes this node is currently connected to, if it is not itself public |
+| 33  | array of bytes(32) | Via: node IDs of the public stations this node is currently connected to, if it is not itself public |
 
 The Node entry is what makes a NATed node reachable: any node can route to it through one of its Via nodes (§7.4). It is refreshed whenever the Via set changes.
 
@@ -289,7 +290,7 @@ Every DELIVER and ACK carries a target node ID. A node receiving one it is not t
 
 1. If the target is a direct peer, to that peer.
 2. Else if the target's Node entry lists Via nodes and any is a direct peer, to that peer.
-3. Else if any Via node is known, to a public-node peer (public nodes are well connected and will reach the Via node in one or two more hops).
+3. Else if any Via node is known, to a public-node peer (public stations are well connected and will reach the Via node in one or two more hops).
 4. Else, drop and, for DELIVER, return an ACK with REFUSED and reason "unreachable" if a path back to the source exists.
 
 Hops remaining bounds all of this. There is no routing table beyond the gossip state; the Node entries *are* the routing table.
@@ -376,9 +377,9 @@ A node answers BACKLOG_REQ from any node, subject to rate limiting, and sends on
 ## 11. Open Questions
 
 1. **Encoding.** CBOR with integer keys is proposed. Protocol Buffers would give a schema and generated code at the cost of a build dependency. Worth deciding before the first line of Go.
-2. **Room fan-out at scale.** Direct fan-out from the origin is simple and correct but linear in the number of nodes carrying a room. A tree (or having public nodes fan out on behalf of NATed origins) is the obvious next step; nothing here precludes it.
+2. **Room fan-out at scale.** Direct fan-out from the origin is simple and correct but linear in the number of nodes carrying a room. A tree (or having public stations fan out on behalf of NATed origins) is the obvious next step; nothing here precludes it.
 3. **Presence summarization.** Full presence replication is fine to tens of thousands of callsigns. Beyond that, nodes would gossip per-node Bloom filters and fetch detail on demand. The DELTA_REQ mechanism is the natural hook.
-4. **Multiple Via nodes.** A NATed node should connect to at least two public nodes so that one going down does not make it unreachable; is that a requirement or a recommendation?
+4. **Multiple Via nodes.** A NATed node should connect to at least two public stations so that one going down does not make it unreachable; is that a requirement or a recommendation?
 5. **Abuse.** Rate limits per origin node and per callsign are implied but not specified. A node can already block node IDs and callsigns; is per-node reputation wanted in this version, or is "block it and tell the operator" enough?
 6. **Key rotation.** A node that loses its key becomes a new node. Is a signed "successor" statement worth having, or is starting fresh acceptable?
 7. **DNS seed format and names.** Proposed above; needs a real domain and a decision about who maintains seeds.
@@ -391,4 +392,4 @@ A node answers BACKLOG_REQ from any node, subject to rate limiting, and sends on
 - **Gossip:** per-origin tables with sequence numbers and epochs, flooded with dedup and reconciled by digest.
 - **Subscriptions** travel inside presence entries; per-node room sets are derived.
 - **Delivery:** custody transfer for unicast; best-effort fan-out for rooms and receipts.
-- **Reachability:** NATed nodes are routed to via the public nodes they are connected to, advertised in their Node entry.
+- **Reachability:** NATed nodes are routed to via the public stations they are connected to, advertised in their Node entry.

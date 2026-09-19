@@ -1,4 +1,4 @@
-package roost
+package qtcd
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jancona/pigeon/store"
+	"github.com/jancona/qtc/store"
 	"github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
@@ -22,12 +22,12 @@ import (
 
 // Topic and protocol names, version 0.
 const (
-	PresenceTopic   = "/pigeon/0/presence"
-	RoomTopicPrefix = "/pigeon/0/room/"
+	PresenceTopic   = "/qtc/0/presence"
+	RoomTopicPrefix = "/qtc/0/room/"
 )
 
 // startP2P builds the libp2p host, DHT, gossipsub, and the store server.
-func (r *Roost) startP2P() error {
+func (r *Station) startP2P() error {
 	ident, err := libp2pKey(r.key)
 	if err != nil {
 		return err
@@ -48,8 +48,8 @@ func (r *Roost) startP2P() error {
 	if r.cfg.Caps.Has(CapPublic) {
 		opts = append(opts, libp2p.ForceReachabilityPublic())
 	} else {
-		// A roost without the public capability is assumed to be behind
-		// NAT: it reserves relay slots on its bootstrap peers right away
+		// A station without the public capability is assumed to be behind
+		// NAT: it reserves circuit relay slots on its bootstrap peers right away
 		// and hole-punches from there.
 		opts = append(opts, libp2p.ForceReachabilityPrivate())
 		if len(bootstrap) > 0 {
@@ -57,13 +57,13 @@ func (r *Roost) startP2P() error {
 		}
 	}
 	if r.cfg.Caps.Has(CapRelay) {
-		// The spike carries all traffic over the relay when hole punching
+		// The spike carries all traffic over the circuit relay when hole punching
 		// fails, so the default per-connection limits are lifted.
 		opts = append(opts, libp2p.EnableRelayService(relay.WithInfiniteLimits()))
 	}
 	h, err := libp2p.New(opts...)
 	if err != nil {
-		return fmt.Errorf("roost: libp2p host: %w", err)
+		return fmt.Errorf("qtcd: libp2p host: %w", err)
 	}
 	r.host = h
 
@@ -72,9 +72,9 @@ func (r *Roost) startP2P() error {
 		if r.cfg.Caps.Has(CapPublic) {
 			mode = dht.ModeServer
 		}
-		d, err := dht.New(h, dht.Mode(mode), dht.BootstrapPeers(bootstrap...), dht.ProtocolPrefix("/pigeon"))
+		d, err := dht.New(h, dht.Mode(mode), dht.BootstrapPeers(bootstrap...), dht.ProtocolPrefix("/qtc"))
 		if err != nil {
-			return fmt.Errorf("roost: dht: %w", err)
+			return fmt.Errorf("qtcd: dht: %w", err)
 		}
 		r.dht = d
 	}
@@ -87,11 +87,11 @@ func (r *Roost) startP2P() error {
 		}),
 	)
 	if err != nil {
-		return fmt.Errorf("roost: gossipsub: %w", err)
+		return fmt.Errorf("qtcd: gossipsub: %w", err)
 	}
 	r.ps = ps
 
-	if r.cfg.Caps.Has(CapInbox) {
+	if r.cfg.Caps.Has(CapMailbox) {
 		r.mem = store.NewMemStore()
 		r.server = store.NewServer(r.mem)
 		r.server.Policy = store.Policy{DefaultTTL: r.cfg.DefaultTTL}
@@ -118,7 +118,7 @@ func (r *Roost) startP2P() error {
 }
 
 // connectLoop keeps a connection to a bootstrap peer.
-func (r *Roost) connectLoop(ai peer.AddrInfo) {
+func (r *Station) connectLoop(ai peer.AddrInfo) {
 	delay := time.Second
 	for {
 		if r.host.Network().Connectedness(ai.ID) != network.Connected {
@@ -142,7 +142,7 @@ func (r *Roost) connectLoop(ai peer.AddrInfo) {
 }
 
 // Connect dials another node directly. Tests use it to build a mesh.
-func (r *Roost) Connect(ctx context.Context, ai peer.AddrInfo) error {
+func (r *Station) Connect(ctx context.Context, ai peer.AddrInfo) error {
 	return r.host.Connect(ctx, ai)
 }
 
@@ -152,11 +152,11 @@ func parseAddrInfos(addrs []string) ([]peer.AddrInfo, error) {
 	for _, s := range addrs {
 		m, err := ma.NewMultiaddr(s)
 		if err != nil {
-			return nil, fmt.Errorf("roost: bootstrap %q: %w", s, err)
+			return nil, fmt.Errorf("qtcd: bootstrap %q: %w", s, err)
 		}
 		ai, err := peer.AddrInfoFromP2pAddr(m)
 		if err != nil {
-			return nil, fmt.Errorf("roost: bootstrap %q: %w", s, err)
+			return nil, fmt.Errorf("qtcd: bootstrap %q: %w", s, err)
 		}
 		if cur := byID[ai.ID]; cur != nil {
 			cur.Addrs = append(cur.Addrs, ai.Addrs...)
@@ -172,11 +172,11 @@ func parseAddrInfos(addrs []string) ([]peer.AddrInfo, error) {
 	return out, nil
 }
 
-// openStore opens a store protocol stream to an inbox node.
-func (r *Roost) openStore(ctx context.Context, id peer.ID) (network.Stream, error) {
+// openStore opens a store protocol stream to a mailbox node.
+func (r *Station) openStore(ctx context.Context, id peer.ID) (network.Stream, error) {
 	s, err := r.host.NewStream(ctx, id, store.ProtocolID)
 	if err != nil {
-		return nil, fmt.Errorf("roost: open store stream to %s: %w", id, err)
+		return nil, fmt.Errorf("qtcd: open store stream to %s: %w", id, err)
 	}
 	return s, nil
 }

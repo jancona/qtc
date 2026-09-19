@@ -1,8 +1,8 @@
-// Package store implements the Pigeon inbox storage protocol (node protocol
+// Package store implements the QTC mailbox storage protocol (node protocol
 // §5): JSON Lines PUT, QUERY, and WATCH over a byte stream, with a Server
 // that serves one stream against a Store, a Client for the other end, and
 // an in-memory Store for the spike. It is standard library plus envelope;
-// the libp2p stream is handed in by roost as an io.ReadWriter.
+// the libp2p stream is handed in by station as an io.ReadWriter.
 package store
 
 import (
@@ -11,11 +11,11 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/jancona/pigeon/envelope"
+	"github.com/jancona/qtc/envelope"
 )
 
 // ProtocolID is the libp2p stream protocol ID.
-const ProtocolID = "/pigeon/0/store"
+const ProtocolID = "/qtc/0/store"
 
 // Limits from node protocol §5.
 const (

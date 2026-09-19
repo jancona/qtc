@@ -1,5 +1,5 @@
 {
-  "pigeon_fixtures_version": 2,
+  "qtc_fixtures_version": 3,
   "notes": [
     "All byte strings are lowercase hex. All integers are decimal.",
     "Packet types are provisional (Envelope spec §3).",

@@ -4,7 +4,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/jancona/pigeon/envelope"
+	"github.com/jancona/qtc/envelope"
 )
 
 // Record is a stored envelope.
@@ -18,7 +18,7 @@ type Record struct {
 // ID is the storage key within a callsign.
 func (r Record) ID() envelope.ID { return r.Env.StoreID() }
 
-// Store is inbox storage keyed by callsign and StoreID. Implementations must
+// Store is mailbox storage keyed by callsign and StoreID. Implementations must
 // be safe for concurrent use.
 type Store interface {
 	// Put stores rec unless an envelope with the same callsign and ID is

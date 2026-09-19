@@ -1,4 +1,4 @@
-package roost
+package qtcd
 
 import (
 	"context"
@@ -6,26 +6,26 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jancona/pigeon/envelope"
-	"github.com/jancona/pigeon/store"
+	"github.com/jancona/qtc/envelope"
+	"github.com/jancona/qtc/store"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
-// inboxSet manages this node's store connections to inbox members and the
+// mailboxSet manages this node's store connections to mailbox members and the
 // PUT-with-retry queue (node protocol §6). During the spike every callsign
 // has the same, statically configured member set.
-type inboxSet struct {
-	r       *Roost
+type mailboxSet struct {
+	r       *Station
 	members []peer.ID
 
 	mu    sync.Mutex
 	conns map[peer.ID]*memberConn
 }
 
-// memberConn is one store stream to one inbox node, reopened on failure.
+// memberConn is one store stream to one mailbox node, reopened on failure.
 type memberConn struct {
-	set    *inboxSet
+	set    *mailboxSet
 	id     peer.ID
 	mu     sync.Mutex
 	stream network.Stream
@@ -34,12 +34,12 @@ type memberConn struct {
 	watched map[envelope.Address]struct{}
 }
 
-func newInboxSet(r *Roost) *inboxSet {
-	s := &inboxSet{r: r, conns: map[peer.ID]*memberConn{}}
-	for _, m := range r.cfg.InboxMembers {
+func newMailboxSet(r *Station) *mailboxSet {
+	s := &mailboxSet{r: r, conns: map[peer.ID]*memberConn{}}
+	for _, m := range r.cfg.MailboxMembers {
 		id, err := peer.Decode(m)
 		if err != nil {
-			r.log.Error("bad inbox member peer ID", "member", m, "err", err)
+			r.log.Error("bad mailbox member peer ID", "member", m, "err", err)
 			continue
 		}
 		s.members = append(s.members, id)
@@ -47,11 +47,11 @@ func newInboxSet(r *Roost) *inboxSet {
 	return s
 }
 
-// membersFor returns the inbox members for a base callsign. Static during
-// the spike; will read the inbox record later.
-func (s *inboxSet) membersFor(envelope.Address) []peer.ID { return s.members }
+// membersFor returns the mailbox members for a base callsign. Static during
+// the spike; will read the mailbox record later.
+func (s *mailboxSet) membersFor(envelope.Address) []peer.ID { return s.members }
 
-func (s *inboxSet) conn(id peer.ID) *memberConn {
+func (s *mailboxSet) conn(id peer.ID) *memberConn {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	c := s.conns[id]
@@ -62,7 +62,7 @@ func (s *inboxSet) conn(id peer.ID) *memberConn {
 	return c
 }
 
-func (s *inboxSet) closeAll() {
+func (s *mailboxSet) closeAll() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, c := range s.conns {
@@ -134,17 +134,17 @@ func (c *memberConn) watch(ctx context.Context, calls ...envelope.Address) error
 // eventLoop delivers EVENTs from one member until the stream ends, then
 // reconnects so the WATCH is restored, and sweeps to pick up anything
 // stored while the stream was down.
-func (r *Roost) eventLoop(id peer.ID, cl *store.Client) {
+func (r *Station) eventLoop(id peer.ID, cl *store.Client) {
 	for ev := range cl.Events() {
 		r.onStored(ev.Callsign, ev.Env, id)
 	}
 	r.log.Info("store stream closed", "member", id, "err", cl.Err())
-	r.inbox.rewatch(id)
+	r.mailbox.rewatch(id)
 }
 
 // rewatch reopens the stream to a member with backoff until it succeeds
 // (client re-sends the WATCH set), then sweeps every homed callsign.
-func (s *inboxSet) rewatch(id peer.ID) {
+func (s *mailboxSet) rewatch(id peer.ID) {
 	c := s.conn(id)
 	c.mu.Lock()
 	n := len(c.watched)
@@ -180,14 +180,14 @@ func (s *inboxSet) rewatch(id peer.ID) {
 	}
 }
 
-// putAll stores e under callsign on every inbox member, retrying each until
+// putAll stores e under callsign on every mailbox member, retrying each until
 // it accepts or the envelope expires. onFirst runs once, when the first
 // member accepts.
-func (s *inboxSet) putAll(callsign envelope.Address, e *envelope.Envelope, onFirst func()) {
+func (s *mailboxSet) putAll(callsign envelope.Address, e *envelope.Envelope, onFirst func()) {
 	base := callsign.Base()
 	members := s.membersFor(base)
 	if len(members) == 0 {
-		s.r.log.Warn("no inbox members configured; envelope not stored", "callsign", base, "envelope", e)
+		s.r.log.Warn("no mailbox members configured; envelope not stored", "callsign", base, "envelope", e)
 		return
 	}
 	var once sync.Once
@@ -197,7 +197,7 @@ func (s *inboxSet) putAll(callsign envelope.Address, e *envelope.Envelope, onFir
 	}
 }
 
-func (s *inboxSet) putRetry(id peer.ID, base envelope.Address, e *envelope.Envelope, once *sync.Once, onFirst func()) {
+func (s *mailboxSet) putRetry(id peer.ID, base envelope.Address, e *envelope.Envelope, once *sync.Once, onFirst func()) {
 	deadline := s.expiry(e)
 	delay := 2 * time.Second
 	for {
@@ -211,7 +211,7 @@ func (s *inboxSet) putRetry(id peer.ID, base envelope.Address, e *envelope.Envel
 		var pe *store.PutError
 		if errors.As(err, &pe) {
 			// The member answered; retrying a refusal is pointless.
-			s.r.log.Warn("inbox refused envelope", "member", id, "callsign", base, "id", e.StoreID(), "code", pe.Code, "reason", pe.Reason)
+			s.r.log.Warn("mailbox refused envelope", "member", id, "callsign", base, "id", e.StoreID(), "code", pe.Code, "reason", pe.Reason)
 			return
 		}
 		if unixNow() >= deadline {
@@ -228,7 +228,7 @@ func (s *inboxSet) putRetry(id peer.ID, base envelope.Address, e *envelope.Envel
 	}
 }
 
-func (s *inboxSet) putOnce(id peer.ID, base envelope.Address, e *envelope.Envelope) error {
+func (s *mailboxSet) putOnce(id peer.ID, base envelope.Address, e *envelope.Envelope) error {
 	ctx, cancel := context.WithTimeout(s.r.ctx, 30*time.Second)
 	defer cancel()
 	cl, err := s.conn(id).client(ctx)
@@ -240,7 +240,7 @@ func (s *inboxSet) putOnce(id peer.ID, base envelope.Address, e *envelope.Envelo
 
 // expiry is how long to keep retrying a PUT: the envelope's own expiry when
 // known, otherwise the default TTL from now.
-func (s *inboxSet) expiry(e *envelope.Envelope) uint32 {
+func (s *mailboxSet) expiry(e *envelope.Envelope) uint32 {
 	if m, ok := e.Msg(); ok {
 		if exp, ok := m.Expiry(); ok {
 			return exp
@@ -250,7 +250,7 @@ func (s *inboxSet) expiry(e *envelope.Envelope) uint32 {
 }
 
 // query runs QueryAll against one member.
-func (s *inboxSet) query(ctx context.Context, id peer.ID, base envelope.Address, since uint32) ([]*envelope.Envelope, error) {
+func (s *mailboxSet) query(ctx context.Context, id peer.ID, base envelope.Address, since uint32) ([]*envelope.Envelope, error) {
 	cl, err := s.conn(id).client(ctx)
 	if err != nil {
 		return nil, err

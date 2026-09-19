@@ -1,7 +1,7 @@
-// Package roost is the Pigeon node daemon as a library. This file holds room
+// Package station is the QTC node daemon as a library. This file holds room
 // subscription state (rooms spec §4–§6); the M17_inet and libp2p faces live
 // in their own files. Everything here is standard library plus envelope.
-package roost
+package qtcd
 
 import (
 	"errors"
@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/jancona/pigeon/envelope"
+	"github.com/jancona/qtc/envelope"
 )
 
 // DefaultSubscriptionExpiry is how long a subscription lives after the
@@ -19,15 +19,15 @@ const DefaultSubscriptionExpiry uint32 = 30 * 24 * 3600
 
 // Errors from the subscription state.
 var (
-	ErrNotCallsign  = errors.New("roost: address is not a callsign")
-	ErrNotRoomOp    = errors.New("roost: not a JOIN or LEAVE")
-	ErrNoTimestamp  = errors.New("roost: ROOM envelope has timestamp 0; substitute the receipt time first")
-	ErrNotRequest   = errors.New("roost: ROOM packet is a reply, not a request")
-	ErrNotCommand   = errors.New("roost: text is not a room command")
-	ErrBadRoomName  = errors.New("roost: invalid room name")
-	ErrUnknownCmd   = errors.New("roost: unknown command")
-	ErrNoLocalRoom  = errors.New("roost: node callsign does not yield a valid local room name")
-	ErrNotValidRoom = errors.New("roost: not a valid room address")
+	ErrNotCallsign  = errors.New("qtcd: address is not a callsign")
+	ErrNotRoomOp    = errors.New("qtcd: not a JOIN or LEAVE")
+	ErrNoTimestamp  = errors.New("qtcd: ROOM envelope has timestamp 0; substitute the receipt time first")
+	ErrNotRequest   = errors.New("qtcd: ROOM packet is a reply, not a request")
+	ErrNotCommand   = errors.New("qtcd: text is not a room command")
+	ErrBadRoomName  = errors.New("qtcd: invalid room name")
+	ErrUnknownCmd   = errors.New("qtcd: unknown command")
+	ErrNoLocalRoom  = errors.New("qtcd: node callsign does not yield a valid local room name")
+	ErrNotValidRoom = errors.New("qtcd: not a valid room address")
 )
 
 // SubscriptionsConfig configures Subscriptions.
@@ -45,7 +45,7 @@ type SubscriptionsConfig struct {
 
 // Subscriptions is a node's view of which base callsigns are in which rooms,
 // derived from ROOM JOIN and LEAVE envelopes (its own and those found in
-// inbox sweeps) plus node-local auto-subscription to the local room. It is
+// mailbox sweeps) plus node-local auto-subscription to the local room. It is
 // safe for concurrent use.
 type Subscriptions struct {
 	local   envelope.Address
@@ -134,7 +134,7 @@ func (c *callRooms) apply(room envelope.Address, ts uint32, joined bool) {
 }
 
 // Apply records a stored ROOM JOIN or LEAVE envelope for a callsign, as
-// found by an inbox sweep or produced by Handle or ImplicitJoin on this
+// found by a mailbox sweep or produced by Handle or ImplicitJoin on this
 // node. The envelope's timestamp must be non-zero.
 func (s *Subscriptions) Apply(callsign envelope.Address, e *envelope.Envelope) error {
 	base, err := baseOf(callsign)
@@ -179,7 +179,7 @@ func (s *Subscriptions) Heard(callsign envelope.Address, now uint32) error {
 }
 
 // ImplicitJoin records that a callsign sent a MSG to a room (rooms spec
-// §4.2) and returns the synthesized ROOM JOIN to store in its inbox. ts is
+// §4.2) and returns the synthesized ROOM JOIN to store in its mailbox. ts is
 // the MSG's timestamp; now is used when it is 0.
 func (s *Subscriptions) ImplicitJoin(callsign, room envelope.Address, ts, now uint32) (*envelope.Envelope, error) {
 	if !room.IsRoom() {
@@ -190,7 +190,7 @@ func (s *Subscriptions) ImplicitJoin(callsign, room envelope.Address, ts, now ui
 	}
 	join, err := envelope.BuildRoom(envelope.OpJoin, ts, []envelope.Address{room}, "")
 	if err != nil {
-		return nil, fmt.Errorf("roost: implicit join: %w", err)
+		return nil, fmt.Errorf("qtcd: implicit join: %w", err)
 	}
 	if err := s.Apply(callsign, join); err != nil {
 		return nil, err
@@ -200,7 +200,7 @@ func (s *Subscriptions) ImplicitJoin(callsign, room envelope.Address, ts, now ui
 
 // Handle processes a ROOM request (JOIN, LEAVE, LIST) from callsign and
 // returns the reply to send and, for JOIN and LEAVE, the envelope to PUT to
-// the callsign's inbox (nil if nothing was accepted). A request whose
+// the callsign's mailbox (nil if nothing was accepted). A request whose
 // timestamp is 0 has now substituted before it is applied and stored. Rooms
 // outside the valid range, or not carried by this node, are refused; a JOIN
 // or LEAVE that is partly refused still applies the rest and replies
@@ -227,7 +227,7 @@ func (s *Subscriptions) Handle(callsign envelope.Address, req *envelope.Envelope
 		return reply, nil, err
 	case envelope.OpJoin, envelope.OpLeave:
 	default:
-		return nil, nil, fmt.Errorf("roost: unknown ROOM op %s", r.Op())
+		return nil, nil, fmt.Errorf("qtcd: unknown ROOM op %s", r.Op())
 	}
 
 	join := r.Op() == envelope.OpJoin
@@ -257,7 +257,7 @@ func (s *Subscriptions) Handle(callsign envelope.Address, req *envelope.Envelope
 		// (rooms spec §5.1).
 		store, err = envelope.BuildRoom(r.Op(), ts, accepted, "")
 		if err != nil {
-			return nil, nil, fmt.Errorf("roost: store envelope: %w", err)
+			return nil, nil, fmt.Errorf("qtcd: store envelope: %w", err)
 		}
 	}
 	if len(refused) > 0 {
@@ -280,7 +280,7 @@ func (s *Subscriptions) refused(now uint32, rooms []envelope.Address, note strin
 func (s *Subscriptions) refusedReply(now uint32, rooms []envelope.Address, note string) (*envelope.Envelope, error) {
 	reply, err := envelope.BuildRoom(envelope.OpRefused, now, rooms, note)
 	if err != nil {
-		return nil, fmt.Errorf("roost: REFUSED reply: %w", err)
+		return nil, fmt.Errorf("qtcd: REFUSED reply: %w", err)
 	}
 	return reply, nil
 }

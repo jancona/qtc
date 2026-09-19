@@ -1,4 +1,4 @@
-package roost
+package qtcd
 
 import (
 	"crypto/ecdsa"
@@ -19,7 +19,7 @@ func loadOrCreateKey(path string) (*ecdsa.PrivateKey, error) {
 	if path == "" {
 		k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 		if err != nil {
-			return nil, fmt.Errorf("roost: generate key: %w", err)
+			return nil, fmt.Errorf("qtcd: generate key: %w", err)
 		}
 		return k, nil
 	}
@@ -28,31 +28,31 @@ func loadOrCreateKey(path string) (*ecdsa.PrivateKey, error) {
 	case errors.Is(err, os.ErrNotExist):
 		k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 		if err != nil {
-			return nil, fmt.Errorf("roost: generate key: %w", err)
+			return nil, fmt.Errorf("qtcd: generate key: %w", err)
 		}
 		der, err := x509.MarshalPKCS8PrivateKey(k)
 		if err != nil {
-			return nil, fmt.Errorf("roost: encode key: %w", err)
+			return nil, fmt.Errorf("qtcd: encode key: %w", err)
 		}
 		pemBytes := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
 		if err := os.WriteFile(path, pemBytes, 0o600); err != nil {
-			return nil, fmt.Errorf("roost: write key %s: %w", path, err)
+			return nil, fmt.Errorf("qtcd: write key %s: %w", path, err)
 		}
 		return k, nil
 	case err != nil:
-		return nil, fmt.Errorf("roost: read key %s: %w", path, err)
+		return nil, fmt.Errorf("qtcd: read key %s: %w", path, err)
 	}
 	block, _ := pem.Decode(b)
 	if block == nil {
-		return nil, fmt.Errorf("roost: key %s: no PEM block", path)
+		return nil, fmt.Errorf("qtcd: key %s: no PEM block", path)
 	}
 	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 	if err != nil {
-		return nil, fmt.Errorf("roost: key %s: %w", path, err)
+		return nil, fmt.Errorf("qtcd: key %s: %w", path, err)
 	}
 	k, ok := parsed.(*ecdsa.PrivateKey)
 	if !ok || k.Curve != elliptic.P256() {
-		return nil, fmt.Errorf("roost: key %s is not ECDSA P-256", path)
+		return nil, fmt.Errorf("qtcd: key %s is not ECDSA P-256", path)
 	}
 	return k, nil
 }
@@ -61,7 +61,7 @@ func loadOrCreateKey(path string) (*ecdsa.PrivateKey, error) {
 func libp2pKey(k *ecdsa.PrivateKey) (crypto.PrivKey, error) {
 	priv, _, err := crypto.ECDSAKeyPairFromKey(k)
 	if err != nil {
-		return nil, fmt.Errorf("roost: libp2p identity: %w", err)
+		return nil, fmt.Errorf("qtcd: libp2p identity: %w", err)
 	}
 	return priv, nil
 }

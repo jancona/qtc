@@ -1,4 +1,4 @@
-package roost
+package qtcd
 
 import (
 	"context"
@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jancona/pigeon/envelope"
+	"github.com/jancona/qtc/envelope"
 )
 
-// deliveries collects what a roost delivers to local devices.
+// deliveries collects what a station delivers to local devices.
 type deliveries struct {
 	mu   sync.Mutex
 	list []delivery
@@ -54,12 +54,12 @@ func (d *deliveries) count(pred func(delivery) bool) int {
 
 func testLog(t *testing.T, name string) *slog.Logger {
 	if testing.Verbose() {
-		return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})).With("roost", name)
+		return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})).With("station", name)
 	}
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
-func startRoost(t *testing.T, cfg Config, d *deliveries) *Roost {
+func startStation(t *testing.T, cfg Config, d *deliveries) *Station {
 	t.Helper()
 	cfg.ListenAddrs = []string{"/ip4/127.0.0.1/tcp/0"}
 	cfg.Log = testLog(t, cfg.Callsign)
@@ -101,36 +101,36 @@ func mustMsg(t *testing.T, src, dst envelope.Address, ts uint32, ttl, nonce uint
 	return e
 }
 
-// TestThreeNodeSpike runs the spike topology in one process: a public inbox
-// node and two roosts, each homing one callsign. It checks the unicast
+// TestThreeNodeSpike runs the spike topology in one process: a public mailbox
+// node and two stations, each homing one callsign. It checks the unicast
 // path with receipts, presence, and a room message.
 func TestThreeNodeSpike(t *testing.T) {
 	if testing.Short() {
 		t.Skip("network-heavy")
 	}
 	var dP, dA, dB deliveries
-	pub := startRoost(t, Config{Callsign: "K1XYZ  R", Caps: CapPublic | CapRelay | CapInbox, Software: "test"}, &dP)
+	pub := startStation(t, Config{Callsign: "K1XYZ  R", Caps: CapPublic | CapRelay | CapMailbox, Software: "test"}, &dP)
 	pubAddr := pub.AddrInfo()
 	var bootstrap []string
 	for _, a := range pubAddr.Addrs {
 		bootstrap = append(bootstrap, a.String()+"/p2p/"+pubAddr.ID.String())
 	}
-	common := Config{Bootstrap: bootstrap, InboxMembers: []string{pubAddr.ID.String()}, Software: "test"}
+	common := Config{Bootstrap: bootstrap, MailboxMembers: []string{pubAddr.ID.String()}, Software: "test"}
 
 	cfgA := common
 	cfgA.Callsign, cfgA.Devices = "N1ADJ  R", []string{"N1ADJ  H"}
-	a := startRoost(t, cfgA, &dA)
+	a := startStation(t, cfgA, &dA)
 	cfgB := common
 	cfgB.Callsign, cfgB.Devices = "W1AW  R", []string{"W1AW"}
-	b := startRoost(t, cfgB, &dB)
+	b := startStation(t, cfgB, &dB)
 	// A and B are not connected directly; they must find each other from
-	// presence and connect through the public node's relay (or hole punch).
+	// presence and connect through the public station's circuit relay (or hole punch).
 
 	n1adjH := mustAddr(t, "N1ADJ  H")
 	w1aw := mustAddr(t, "W1AW")
 
-	// Both roosts home their callsign and watch it on the inbox node.
-	eventually(t, "watches on the inbox node", 20*time.Second, func() bool {
+	// Both stations home their callsign and watch it on the mailbox node.
+	eventually(t, "watches on the mailbox node", 20*time.Second, func() bool {
 		return pub.server.Watchers(n1adjH) == 1 && pub.server.Watchers(w1aw) == 1
 	})
 
@@ -161,9 +161,9 @@ func TestThreeNodeSpike(t *testing.T) {
 	if rc, _ := dA.find(isRcpt(envelope.StatusTransmitted)); rc.env.Source() != b.Callsign() {
 		t.Errorf("TRANSMITTED from %s, want %s", rc.env.Source(), b.Callsign())
 	}
-	// Inbox node holds the message under both callsigns plus the receipts.
+	// Mailbox node holds the message under both callsigns plus the receipts.
 	if n := pub.mem.Len(); n < 4 {
-		t.Errorf("inbox holds %d envelopes, want at least 4", n)
+		t.Errorf("mailbox holds %d envelopes, want at least 4", n)
 	}
 
 	// Never twice: a sweep on B must not redeliver.
@@ -175,14 +175,14 @@ func TestThreeNodeSpike(t *testing.T) {
 		t.Errorf("QUEUED delivered %d times", n)
 	}
 
-	// Presence: A learns that B roosts W1AW, and both see the public node's card.
+	// Presence: A learns that B stations W1AW, and both see the public station's card.
 	eventually(t, "presence", 20*time.Second, func() bool {
-		roosts := a.Presence().Roosts(w1aw)
-		if len(roosts) != 1 || roosts[0] != b.ID() {
+		stations := a.Presence().Stations(w1aw)
+		if len(stations) != 1 || stations[0] != b.ID() {
 			return false
 		}
 		n, ok := a.Presence().Node(pub.ID())
-		return ok && n.Caps.Has(CapInbox) && n.Callsign == pub.Callsign()
+		return ok && n.Caps.Has(CapMailbox) && n.Callsign == pub.Callsign()
 	})
 
 	// Rooms: N1ADJ joins MAINE explicitly; W1AW sends to it implicitly.
