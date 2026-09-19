@@ -10,5 +10,13 @@
   "rooms": [],
   "devices": ["N1ADJ  H"],
   "metrics_interval": "60s",
-  "admin": "127.0.0.1:8017"
+  "admin": "127.0.0.1:8017",
+  "inet": {
+    "listen": "0.0.0.0:17000",
+    "hosts_file": "/opt/m17/m17-gateway/M17Hosts.txt",
+    "modules": {
+      "A": {"reflector": "M17-M17", "module": "C", "mode": "pigeon"},
+      "B": {"reflector": "M17-M17", "module": "C", "mode": "native"}
+    }
+  }
 }

@@ -180,9 +180,25 @@ A roost subscribes to a room's topic while it has any local subscriber to the ro
 
 Per-callsign subscription lists (needed so a callsign's rooms follow it between roosts) are carried in the inbox record's storage as ROOM envelopes: a roost that processes a JOIN or LEAVE PUTs a ROOM envelope to the callsign's inbox, and a roost newly homing the callsign reads the latest ROOM state from its sweep. This resolves Rooms open question 1 without a separate table.
 
-## 10. Node Behaviour Toward Clients
+## 10. Node Behaviour Toward Clients (the client face)
 
-The client side is M17_inet and outside this protocol. Required behaviours: publish presence truthfully with `via`; proxy stream frames and unhandled packet types to the upstream reflector unchanged; intercept MSG, RCPT, ROOM, and SMS; never send the same message ID to the same device twice.
+The client side is M17_inet and outside this protocol; this section records how a node behaves on it.
+
+A node presents itself as one M17_inet reflector with its own name (for example `M17-PIG`) on one UDP port. Gateways and clients link to it by choosing that name, exactly as they would any reflector, so using Pigeon is an explicit choice made at the gateway. The node is configured with a map from module letter to an upstream reflector and module and a **mode**, `native` or `pigeon`. A CONN or LSTN for an unmapped module is answered with NACK.
+
+For every linked client the node opens an upstream connection to the mapped reflector and relays ACKN, NACK, PING, PONG, DISC, and stream frames unchanged in both directions. Voice is never touched.
+
+**Native mode** is a plain proxy: every packet passes through unchanged in both directions, no presence is published for devices heard on the module, and nothing is delivered to them. **Pigeon mode** is Pigeon-only for messaging:
+
+- MSG, RCPT, and ROOM packets from the client are taken into the node and never forwarded. (These are always taken in, whatever the mode, since no reflector understands them.)
+- SMS from the client is wrapped per Message Envelope §6 and sent through Pigeon; it is not forwarded upstream. An SMS addressed to the node's callsign is a room command if its text begins with `/` (Rooms §6), otherwise a message to the node's local room.
+- Messaging packets (SMS, MSG, RCPT, ROOM) arriving from the upstream reflector are dropped; everything else passes through.
+- The LSF source of every stream frame and packet from the client is published in presence, `via` RF when the client is a gateway (a configured set of addresses, by default the local network) and `via` internet client otherwise.
+- A MSG for a device heard on the module is delivered as SMS (Message Envelope §6) in an M17_inet packet to the client that heard it. Receipts are dropped for legacy clients.
+
+In all modes the node never sends the same message ID to the same device twice.
+
+A consequence to be aware of: a user on a pigeon-mode module can exchange messages only with other Pigeon users. Their SMS never reaches the reflector and reflector SMS never reaches them. That is the intended trade for unambiguous behaviour; the reflector remains available by linking to it directly.
 
 ## 11. Defaults
 

@@ -76,6 +76,10 @@ type Config struct {
 	// Deliver receives every envelope delivered to a local device. nil logs.
 	Deliver func(device envelope.Address, e *envelope.Envelope)
 
+	// Inet configures the M17_inet client face (node protocol §10). nil
+	// disables it.
+	Inet *InetConfig
+
 	PresenceInterval time.Duration // default 5 min
 	SweepInterval    time.Duration // default 1 h
 	ReplayWindow     time.Duration // default 3 h
@@ -126,6 +130,7 @@ type Roost struct {
 	rooms    *roomTopics
 	inbox    *inboxSet
 	dialer   *peerDialer
+	inet     *inetFace
 	mem      *store.MemStore
 	server   *store.Server
 
@@ -203,6 +208,16 @@ func (r *Roost) Start(ctx context.Context) error {
 	r.go_(r.presence.run)
 	r.go_(r.rooms.run)
 	r.go_(r.dialer.run)
+	if r.cfg.Inet != nil {
+		face, err := newInetFace(r, *r.cfg.Inet)
+		if err != nil {
+			r.cancel()
+			return err
+		}
+		r.inet = face
+		r.go_(func() { face.run(r.ctx) })
+		r.log.Info("client face listening", "addr", face.Addr())
+	}
 	if r.cfg.MetricsInterval > 0 {
 		r.go_(r.runMetrics)
 	}
@@ -277,6 +292,14 @@ func (r *Roost) Subscriptions() *Subscriptions { return r.subs }
 func (r *Roost) Presence() *presence { return r.presence }
 
 func unixNow() uint32 { return uint32(time.Now().Unix()) }
+
+// deliverTo hands an envelope to every delivery sink for a device.
+func (r *Roost) deliverTo(device envelope.Address, e *envelope.Envelope) {
+	r.cfg.Deliver(device, e)
+	if r.inet != nil {
+		r.inet.deliver(device, e)
+	}
+}
 
 func (r *Roost) runExpiry() {
 	t := time.NewTicker(time.Minute)

@@ -11,6 +11,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
 	"strings"
@@ -22,20 +23,30 @@ import (
 
 // fileConfig is the on-disk shape of roost.Config.
 type fileConfig struct {
-	Callsign         string   `json:"callsign"`
-	KeyFile          string   `json:"key_file"`
-	Listen           []string `json:"listen"`
-	Bootstrap        []string `json:"bootstrap"`
-	Caps             []string `json:"caps"` // public, relay, inbox, clients
-	Software         string   `json:"software"`
-	DHT              bool     `json:"dht"`
-	InboxMembers     []string `json:"inbox_members"`
-	Rooms            []string `json:"rooms"`
-	Devices          []string `json:"devices"`
-	MetricsInterval  string   `json:"metrics_interval"` // Go duration, e.g. "60s"; "" disables
-	Admin            string   `json:"admin"`            // loopback host:port for the admin HTTP interface; "" disables
-	PresenceInterval string   `json:"presence_interval"`
-	SweepInterval    string   `json:"sweep_interval"`
+	Callsign        string   `json:"callsign"`
+	KeyFile         string   `json:"key_file"`
+	Listen          []string `json:"listen"`
+	Bootstrap       []string `json:"bootstrap"`
+	Caps            []string `json:"caps"` // public, relay, inbox, clients
+	Software        string   `json:"software"`
+	DHT             bool     `json:"dht"`
+	InboxMembers    []string `json:"inbox_members"`
+	Rooms           []string `json:"rooms"`
+	Devices         []string `json:"devices"`
+	MetricsInterval string   `json:"metrics_interval"` // Go duration, e.g. "60s"; "" disables
+	Admin           string   `json:"admin"`            // loopback host:port for the admin HTTP interface; "" disables
+	Inet            *struct {
+		Listen    string   `json:"listen"`     // UDP address the reflector face listens on, e.g. "0.0.0.0:17000"
+		HostsFile string   `json:"hosts_file"` // M17Hosts.txt for resolving reflector names
+		Gateways  []string `json:"gateways"`   // CIDRs whose clients are RF gateways; default private ranges
+		Modules   map[string]struct {
+			Reflector string `json:"reflector"` // upstream name from hosts_file, or host:port
+			Module    string `json:"module"`    // upstream module letter
+			Mode      string `json:"mode"`      // "native" or "pigeon"
+		} `json:"modules"`
+	} `json:"inet"`
+	PresenceInterval string `json:"presence_interval"`
+	SweepInterval    string `json:"sweep_interval"`
 }
 
 func main() {
@@ -150,6 +161,30 @@ func loadConfig(path string) (roost.Config, error) {
 	}
 	if len(cfg.ListenAddrs) == 0 {
 		cfg.ListenAddrs = []string{"/ip4/0.0.0.0/tcp/0"}
+	}
+	if fc.Inet != nil {
+		ic := &roost.InetConfig{Listen: fc.Inet.Listen, HostsFile: fc.Inet.HostsFile, Modules: map[byte]roost.ModuleConfig{}}
+		if ic.Listen == "" {
+			ic.Listen = "0.0.0.0:17000"
+		}
+		for _, c := range fc.Inet.Gateways {
+			_, n, err := net.ParseCIDR(c)
+			if err != nil {
+				return cfg, fmt.Errorf("inet.gateways %q: %w", c, err)
+			}
+			ic.Gateways = append(ic.Gateways, n)
+		}
+		for letter, m := range fc.Inet.Modules {
+			if len(letter) != 1 || len(m.Module) != 1 {
+				return cfg, fmt.Errorf("inet.modules: module letters must be single characters (%q -> %q)", letter, m.Module)
+			}
+			ic.Modules[strings.ToUpper(letter)[0]] = roost.ModuleConfig{
+				Reflector: m.Reflector,
+				Module:    strings.ToUpper(m.Module)[0],
+				Mode:      roost.ModuleMode(strings.ToLower(m.Mode)),
+			}
+		}
+		cfg.Inet = ic
 	}
 	return cfg, nil
 }

@@ -205,7 +205,7 @@ func (r *Roost) deliverLocal(e *envelope.Envelope) {
 		if !r.markDelivered(e, d) {
 			continue
 		}
-		r.cfg.Deliver(d, e)
+		r.deliverTo(d, e)
 		if m, ok := e.Msg(); ok && m.RcptReq() && !dst.IsRoom() {
 			r.issueReceipt(e, envelope.StatusTransmitted, r.presence.lastHeard(d), now)
 		}
