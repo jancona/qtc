@@ -1,72 +1,57 @@
 package qtcd
 
 import (
-	"encoding/binary"
 	"fmt"
 
+	"github.com/jancona/m17"
 	"github.com/jancona/qtc/envelope"
 )
 
-// Minimal M17_inet framing for the client face: just enough to forward
-// datagrams, read source and destination addresses, and build SMS packets.
-// Kept local rather than importing github.com/jancona/m17, whose root
-// package links modem, audio, serial, and ZeroMQ dependencies.
+// M17_inet framing for the client face, built on the m17 root package:
+// just enough to forward datagrams, read source and destination addresses,
+// and build SMS packets.
 
-// M17_inet datagram magics.
+// M17_inet datagram magics, from m17.
 const (
-	magicCONN = "CONN"
-	magicLSTN = "LSTN"
-	magicACKN = "ACKN"
-	magicNACK = "NACK"
-	magicPING = "PING"
-	magicPONG = "PONG"
-	magicDISC = "DISC"
-	magicM17S = "M17 " // stream frame
-	magicM17P = "M17P" // packet
+	magicCONN = m17.MagicCONN
+	magicLSTN = m17.MagicLSTN
+	magicACKN = m17.MagicACKN
+	magicNACK = m17.MagicNACK
+	magicPING = m17.MagicPING
+	magicPONG = m17.MagicPONG
+	magicDISC = m17.MagicDISC
+	magicM17S = m17.MagicM17Stream
+	magicM17P = m17.MagicM17Packet
 )
 
 const (
-	lsfLen        = 30 // DST SRC TYPE META CRC
-	lsdLen        = 28 // LSF without CRC, as carried in stream frames
-	streamDgLen   = 4 + 2 + lsdLen + 2 + 16 + 2
-	lsfTypePacket = 0x0002 // packet mode, data type "data"
+	lsfLen      = m17.LSFLen
+	streamDgLen = 54 // magic, stream ID, LSD, frame number, payload, CRC
 )
 
-// m17CRC is the M17 CRC-16 (polynomial 0x5935, init 0xFFFF, no reflection).
-func m17CRC(b []byte) uint16 {
-	crc := uint16(0xFFFF)
-	for _, x := range b {
-		crc ^= uint16(x) << 8
-		for i := 0; i < 8; i++ {
-			if crc&0x8000 != 0 {
-				crc = crc<<1 ^ 0x5935
-			} else {
-				crc <<= 1
-			}
-		}
-	}
-	return crc
+func encodedCallsign(a envelope.Address) m17.EncodedCallsign {
+	return m17.EncodedCallsign(a.Bytes())
 }
 
-// buildLSF returns a 30-byte packet-mode LSF with empty META.
-func buildLSF(dst, src envelope.Address) []byte {
-	lsf := make([]byte, lsfLen)
-	d, s := dst.Bytes(), src.Bytes()
-	copy(lsf[0:6], d[:])
-	copy(lsf[6:12], s[:])
-	binary.BigEndian.PutUint16(lsf[12:14], lsfTypePacket)
-	binary.BigEndian.PutUint16(lsf[28:30], m17CRC(lsf[:28]))
+// buildLSF returns a packet-mode LSF with empty META, encoded as m17 does
+// for packets (TYPE 0, CAN 0).
+func buildLSF(dst, src envelope.Address) m17.LSF {
+	lsf := m17.NewEmptyLSF()
+	lsf.Dst = encodedCallsign(dst)
+	lsf.Src = encodedCallsign(src)
+	lsf.CalcCRC()
 	return lsf
 }
 
 // buildPacketDatagram frames a packet payload (type byte and contents,
 // without CRC) as an M17_inet "M17P" datagram.
 func buildPacketDatagram(dst, src envelope.Address, payload []byte) []byte {
+	lsf := buildLSF(dst, src)
+	p := m17.Packet{LSF: &lsf, Type: m17.PacketType(payload[0]), Payload: payload[1:]}
+	p.CalcCRC()
 	out := make([]byte, 0, 4+lsfLen+len(payload)+2)
 	out = append(out, magicM17P...)
-	out = append(out, buildLSF(dst, src)...)
-	out = append(out, payload...)
-	return binary.BigEndian.AppendUint16(out, m17CRC(payload))
+	return append(out, p.ToBytes()...)
 }
 
 // packetFrame is a parsed "M17P" datagram.
@@ -76,34 +61,37 @@ type packetFrame struct {
 	payload  []byte // type byte through the end of the contents, CRC stripped
 }
 
-// parsePacketDatagram parses an "M17P" datagram. The packet type is read
-// as a single byte; QTC's and SMS's types are all below 0x80.
+// parsePacketDatagram parses an "M17P" datagram, checking both CRCs.
+// QTC's and SMS's packet types are all single bytes.
 func parsePacketDatagram(b []byte) (packetFrame, error) {
 	var f packetFrame
 	if len(b) < 4+lsfLen+1+2 {
 		return f, fmt.Errorf("packet datagram of %d bytes too short", len(b))
 	}
-	lsf := b[4 : 4+lsfLen]
-	if m17CRC(lsf) != 0 {
+	p := m17.NewPacketFromBytes(b[4:])
+	if !p.LSF.CheckCRC() {
 		return f, fmt.Errorf("packet LSF CRC mismatch")
 	}
-	body := b[4+lsfLen:]
-	if m17CRC(body) != 0 {
+	if !p.CheckCRC() {
 		return f, fmt.Errorf("packet payload CRC mismatch")
 	}
-	f.dst = envelope.AddressFromBytes(lsf[0:6])
-	f.src = envelope.AddressFromBytes(lsf[6:12])
-	f.payload = body[:len(body)-2]
-	f.typ = envelope.PacketType(f.payload[0])
+	if p.Type > 0x7F {
+		return f, fmt.Errorf("packet type %#x is not a single byte", uint32(p.Type))
+	}
+	f.dst = envelope.AddressFromBytes(p.LSF.Dst[:])
+	f.src = envelope.AddressFromBytes(p.LSF.Src[:])
+	f.typ = envelope.PacketType(p.Type)
+	f.payload = append([]byte{byte(p.Type)}, p.Payload...)
 	return f, nil
 }
 
 // streamAddrs reads the destination and source from a stream frame.
 func streamAddrs(b []byte) (dst, src envelope.Address, ok bool) {
-	if len(b) != streamDgLen {
+	sd, err := m17.NewStreamDatagramFromBytes(b)
+	if err != nil {
 		return 0, 0, false
 	}
-	return envelope.AddressFromBytes(b[6:12]), envelope.AddressFromBytes(b[12:18]), true
+	return envelope.AddressFromBytes(sd.LSF.Dst[:]), envelope.AddressFromBytes(sd.LSF.Src[:]), true
 }
 
 // controlDatagram builds a 10-byte control datagram (ACKN, NACK, PING,

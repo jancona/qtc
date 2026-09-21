@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"github.com/jancona/m17"
 	"io"
 	"log/slog"
 	"net"
@@ -151,13 +152,13 @@ func streamDatagram(dst, src envelope.Address) []byte {
 	d, s := dst.Bytes(), src.Bytes()
 	copy(b[6:12], d[:])
 	copy(b[12:18], s[:])
-	binary.BigEndian.PutUint16(b[streamDgLen-2:], m17CRC(b[:streamDgLen-2]))
+	binary.BigEndian.PutUint16(b[streamDgLen-2:], m17.CRC(b[:streamDgLen-2]))
 	return b
 }
 
 func TestM17Frame(t *testing.T) {
 	// M17 CRC check value from the specification: "123456789" -> 0x772B.
-	if got := m17CRC([]byte("123456789")); got != 0x772B {
+	if got := m17.CRC([]byte("123456789")); got != 0x772B {
 		t.Errorf("CRC(123456789) = %#x, want 0x772b", got)
 	}
 	dst, src := mustAddr(t, "W1AW"), mustAddr(t, "N1ADJ  H")
