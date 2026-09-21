@@ -82,3 +82,13 @@ The public station over the same period: RSS 28 MB, 66 goroutines, 0 % CPU, and 
 ## Decision: does libp2p earn its weight?
 
 Yes, on this evidence. What it cost on the Pi Zero 2 W: 28 MB of RSS, no measurable CPU, about 16 MB of free memory, and a 26 MB binary, alongside a gateway already running a software modem on two cores. What it gave for free: TLS-authenticated transport, peer identity from the node key, NAT traversal through a circuit relay with hole punching available, gossipsub for presence and rooms, and a DHT ready for mailbox records. The bugs found during the run were all in station's use of those pieces (reconnection, dialing, presence timing), not in the pieces themselves. The remaining risk is the untested hole-punching path between two different NATs, which does not change the decision because the circuit relay path works and its cost is the public station's bandwidth.
+
+## Milestone 2: proxy reflector, first run (2026-09-21)
+
+Setup: an m17-gateway hotspot (`cc1200trixie`, CC1200 modem, callsign `N1ADJ   C`) on a travel LAN behind Starlink, linked to `M17-QTC` module A served by a qtcd station on a laptop on the same LAN. Module A maps to `M17-M17` module T in qtc mode. The laptop station reached the public station on the Pi 5 over the internet through a WireGuard tunnel. The gateway's only change was one line in its override hosts file and the reflector name and module in its configuration.
+
+- The gateway linked and received M17-M17's ACKN through the proxy in about 80 ms, and stayed linked; PING and PONG pass both ways.
+- A voice transmission from an OpenRTX CS7000 reached M17-M17 module T, and M17-M17's traffic came back to the gateway through the proxy (the gateway logged the returning stream). Voice is unaffected, which is the milestone's success criterion.
+- The station published presence for the radio's callsign (`N1ADJ 8`, via RF) within the first presence interval, and the public station's table showed it. The station homed N1ADJ and auto-subscribed it to the local room.
+
+Not yet tested: SMS in either direction, since the radio's firmware at hand has no SMS support. The room command and message paths are covered by the in-process client face test and wait for a radio that can send SMS.
