@@ -108,7 +108,12 @@ type inetSession struct {
 	last    time.Time
 	heardAt map[envelope.Address]time.Time
 	closed  bool
+	acked   bool   // upstream answered our CONN
+	connReq []byte // the CONN/LSTN as sent upstream, resent until acked
 }
+
+// connRetryInterval is how often an unanswered upstream CONN is resent.
+var connRetryInterval = 5 * time.Second
 
 const heardRateLimit = 5 * time.Second
 
@@ -211,7 +216,7 @@ func (f *inetFace) run(ctx context.Context) {
 	f.cancel()
 	f.mu.Lock()
 	for _, s := range f.sessions {
-		s.close(false)
+		s.close(true) // DISC upstream, or the reflector keeps the link and ignores our next CONN
 	}
 	f.mu.Unlock()
 	f.wg.Wait()
@@ -335,9 +340,35 @@ func (f *inetFace) connect(b []byte, addr *net.UDPAddr) {
 		"upstream", f.upstream[module], "upstream_module", string(mod.Module), "mode", mod.Mode)
 	req := append([]byte(nil), b...)
 	req[10] = mod.Module
+	s.connReq = req
 	s.forwardUp(req)
-	f.wg.Add(1)
+	f.wg.Add(2)
 	go s.readUpstream()
+	go s.retryConn()
+}
+
+// retryConn resends the upstream CONN until the reflector answers or the
+// session ends. Reflectors drop CONNs silently while a stale link for the
+// same callsign is still timing out.
+func (s *inetSession) retryConn() {
+	defer s.face.wg.Done()
+	t := time.NewTicker(connRetryInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-s.face.ctx.Done():
+			return
+		case <-t.C:
+		}
+		s.mu.Lock()
+		done := s.acked || s.closed
+		s.mu.Unlock()
+		if done {
+			return
+		}
+		s.face.log.Debug("resending upstream CONN", "client", s.client, "upstream", s.face.upstream[s.module])
+		s.forwardUp(s.connReq)
+	}
 }
 
 func (s *inetSession) touch() {
@@ -571,6 +602,11 @@ func (s *inetSession) readUpstream() {
 		b := buf[:n]
 		if len(b) < 4 {
 			continue
+		}
+		if m := string(b[:4]); m == magicACKN || m == magicNACK {
+			s.mu.Lock()
+			s.acked = true
+			s.mu.Unlock()
 		}
 		if s.qtcMode && string(b[:4]) == magicM17P {
 			if pf, err := parsePacketDatagram(b); err == nil {
