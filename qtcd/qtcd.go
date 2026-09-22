@@ -61,9 +61,11 @@ type Config struct {
 	// EnableDHT turns on Kademlia peer discovery. Off is for in-process tests.
 	EnableDHT bool
 
-	// MailboxMembers is the spike's static mailbox: the peer IDs used as the
-	// mailbox set for every callsign, in place of DHT mailbox records.
+	// MailboxMembers are seed mailbox stations (peer IDs) used as record
+	// members when presence has not yet shown any mailbox-capable station.
 	MailboxMembers []string
+	// K is the mailbox target size for records this node creates; 0 means 2.
+	K uint8
 
 	// Rooms lists the rooms this node carries; empty carries all.
 	Rooms []string
@@ -84,12 +86,16 @@ type Config struct {
 	// sent it. Off by default: useful for testing, noise on the air.
 	EchoRoomMessages bool
 
-	PresenceInterval time.Duration // default 5 min
-	SweepInterval    time.Duration // default 1 h
-	ReplayWindow     time.Duration // default 3 h
-	ActiveWindow     time.Duration // default 24 h
-	MetricsInterval  time.Duration // 0 disables the metrics log
-	DefaultTTL       uint16        // minutes; default 7 days
+	PresenceInterval  time.Duration // default 5 min
+	SweepInterval     time.Duration // default 1 h
+	ReplayWindow      time.Duration // default 3 h
+	ActiveWindow      time.Duration // default 24 h
+	MetricsInterval   time.Duration // 0 disables the metrics log
+	RecordRefresh     time.Duration // how long a cached mailbox record is trusted before rereading the DHT; default 5 min
+	TakeoverPeriod    time.Duration // home station silence before another station may take over; default 7 days
+	MemberFailSilence time.Duration // member silence in presence before it counts as failed; default 24 h
+	MemberFailSweeps  int           // unreachable sweeps before a member counts as failed; default 3
+	DefaultTTL        uint16        // minutes; default 7 days
 
 	Log *slog.Logger
 }
@@ -109,6 +115,21 @@ func (c *Config) defaults() {
 	}
 	if c.DefaultTTL == 0 {
 		c.DefaultTTL = store.DefaultTTLMinutes
+	}
+	if c.K == 0 {
+		c.K = 2
+	}
+	if c.RecordRefresh == 0 {
+		c.RecordRefresh = 5 * time.Minute
+	}
+	if c.TakeoverPeriod == 0 {
+		c.TakeoverPeriod = 7 * 24 * time.Hour
+	}
+	if c.MemberFailSilence == 0 {
+		c.MemberFailSilence = 24 * time.Hour
+	}
+	if c.MemberFailSweeps == 0 {
+		c.MemberFailSweeps = 3
 	}
 	if c.Software == "" {
 		c.Software = "qtcd/0"
@@ -134,6 +155,7 @@ type Station struct {
 	rooms    *roomTopics
 	mailbox  *mailboxSet
 	dialer   *peerDialer
+	records  *recordStore
 	inet     *inetFace
 	mem      *store.MemStore
 	server   *store.Server
@@ -209,6 +231,8 @@ func (r *Station) Start(ctx context.Context) error {
 	r.presence = newPresence(r)
 	r.rooms = newRoomTopics(r)
 	r.mailbox = newMailboxSet(r)
+	r.records = newRecordStore(r)
+	r.go_(r.records.run)
 	r.go_(r.presence.run)
 	r.go_(r.rooms.run)
 	r.go_(r.dialer.run)

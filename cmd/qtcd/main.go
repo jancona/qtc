@@ -31,6 +31,7 @@ type fileConfig struct {
 	Software         string   `json:"software"`
 	DHT              bool     `json:"dht"`
 	MailboxMembers   []string `json:"mailbox_members"`
+	K                int      `json:"k"` // mailbox target size, default 2
 	Rooms            []string `json:"rooms"`
 	Devices          []string `json:"devices"`
 	MetricsInterval  string   `json:"metrics_interval"`   // Go duration, e.g. "60s"; "" disables
@@ -130,6 +131,7 @@ func loadConfig(path string) (qtcd.Config, error) {
 		Software:         fc.Software,
 		EnableDHT:        fc.DHT,
 		MailboxMembers:   fc.MailboxMembers,
+		K:                uint8(fc.K),
 		Rooms:            fc.Rooms,
 		Devices:          fc.Devices,
 		EchoRoomMessages: fc.EchoRoomMessages,

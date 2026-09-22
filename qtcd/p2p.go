@@ -73,7 +73,8 @@ func (r *Station) startP2P() error {
 		if r.cfg.Caps.Has(CapPublic) {
 			mode = dht.ModeServer
 		}
-		d, err := dht.New(h, dht.Mode(mode), dht.BootstrapPeers(bootstrap...), dht.ProtocolPrefix("/qtc"))
+		d, err := dht.New(h, dht.Mode(mode), dht.BootstrapPeers(bootstrap...), dht.ProtocolPrefix("/qtc"),
+			dht.NamespacedValidator("qtc", recordValidator{}))
 		if err != nil {
 			return fmt.Errorf("qtcd: dht: %w", err)
 		}

@@ -124,3 +124,7 @@ The one path the spike had not exercised. Setup: the public station on the Pi 5 
 - A message from the laptop's device to the home station's device was delivered and both receipts came back within a second.
 
 So hole punching works through Starlink's CGNAT to a home router, at least for this pair, and the relay fallback was there for the seconds before it did. That closes the last open item from the spike's decision on libp2p.
+
+## Milestone 5: mailbox records (2026-09-22, in-process only)
+
+Records replace the static member list. An in-process test with three public mailbox stations and two stations behind them checks: the first station to home a callsign writes version 1 naming itself home station and two mailbox-capable public stations; a sender reads it from the DHT and delivers through those members; a sender's message to an unheard callsign creates a provisional record that the first station to hear the callsign takes over as version 2, after which the stored message reaches the device by sweep; and when a member is stopped, the home station's sweeps count the failures, the member's presence silence passes the configured period, and the home station writes version 2 replacing it with the remaining public station after copying the callsign's full history there. Not yet run on real hardware.

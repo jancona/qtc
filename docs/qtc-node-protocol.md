@@ -72,7 +72,7 @@ DHT key: `/qtc/0/mailbox/<BASE>` where `<BASE>` is the base callsign in canonica
 |---|---|---|
 | callsign | address | Base callsign |
 | version | integer | Monotonically increasing per record |
-| home station | nodeid | Node ID of the home station |
+| home_station | nodeid | Node ID of the home station |
 | members | array of nodeid | Node IDs of mailbox nodes; target size `k` |
 | k | integer | Target size (default 2) |
 | policy | integer | Flags: `split_by_suffix` 1, `provisional` 2 |
@@ -81,13 +81,13 @@ DHT key: `/qtc/0/mailbox/<BASE>` where `<BASE>` is the base callsign in canonica
 | writer_key | bytes | The writer's public key as SubjectPublicKeyInfo DER. Needed because an ECDSA peer ID is a hash of the key, not the key itself |
 | sig | bytes | Writer's ECDSA signature, raw `r ‖ s` (64 bytes), over the canonical field concatenation below |
 
-**Signature input.** JSON has no canonical form, so the signature is computed over a fixed byte string rather than the serialized record: the 6-byte encoded `callsign`, `version` as 8 bytes big-endian, the raw bytes of `home station`, then each member's raw bytes in the order listed, `k` as 1 byte, `policy` as 2 bytes big-endian, `updated` as 4 bytes big-endian, and the raw bytes of `writer`. Readers rebuild this from the parsed fields and verify.
+**Signature input.** JSON has no canonical form, so the signature is computed over a fixed byte string rather than the serialized record: the 6-byte encoded `callsign`, `version` as 8 bytes big-endian, `home_station` as one length byte followed by its raw bytes, the member count as 1 byte then each member as one length byte followed by its raw bytes in the order listed, `k` as 1 byte, `policy` as 2 bytes big-endian, `updated` as 4 bytes big-endian, and `writer` as one length byte followed by its raw bytes. The length prefixes keep the fields unambiguous whatever the node ID length. Readers rebuild this from the parsed fields and verify.
 
-**Validation** (applied by the DHT validator and by every reader): `writer_key` hashes to `writer`; `sig` verifies against `writer_key`; `version` is greater than any previously seen version for this callsign. Ties and lower versions are rejected.
+**Validation.** The DHT validator, which sees one record at a time, checks that `writer_key` hashes to `writer` and that `sig` verifies against `writer_key`; when the DHT holds several valid records for a key it selects the highest `version`, preferring on a tie the record whose `writer` equals its `home_station`. Every reader additionally keeps the highest version it has accepted per callsign and rejects a record whose version is not greater, so a stale or replayed record cannot roll a callsign back.
 
 **Authority** (a convention nodes must follow, not enforceable by the validator): a node may write a record only if it is the record's `home station`, or there is no record, or the current `home station` has been silent in presence for the takeover period (default 7 days), or it is handing off a record it created on a sender's behalf (§7.3). Readers should prefer a record whose `writer` equals its `home station` when versions conflict in the DHT's eventual consistency.
 
-**Creation.** The first node to home a callsign that has no record creates one with itself as `home station` and `k` mailbox-capable public stations as `members`. It prefers public stations it is already connected to (typically its circuit relays), since those are known to be reachable from the user's location; if it has fewer than `k` of those, it fills the set with mailbox-capable nodes found via the DHT.
+**Creation.** The first node to home a callsign that has no record creates one with itself as `home_station` and `k` mailbox-capable public stations as `members`. Candidates are the stations whose presence cards carry the `mailbox` capability, plus any configured seed stations for the bootstrap case where presence has not yet shown any. It prefers public stations it is already connected to (typically its circuit relays), since those are known to be reachable from the user's location. Discovering mailbox-capable stations through the DHT is not defined; capabilities travel in presence only (§2).
 
 Mailbox records are also announced on `/qtc/0/mailbox-records` when written, so nodes that already care about the callsign learn of changes without polling the DHT.
 
@@ -144,7 +144,7 @@ QUERY every member since the station's last sweep time for this callsign (or the
 
 ### 7.3 Records created by senders
 
-A station that creates a record for a callsign it has never heard (because a local user sent to it) sets itself as home station but marks the record with `policy` bit `provisional` (2). The first station to actually hear the callsign takes over the record with a new version and clears the bit; the creating node must accept this regardless of the takeover period.
+A station that creates a record for a callsign it has never heard (because a local user sent to it) sets itself as `home_station` but marks the record with `policy` bit `provisional` (2). The first station to actually hear the callsign takes over the record with a new version and clears the bit; the creating node must accept this regardless of the takeover period.
 
 ### 7.4 Delivery
 

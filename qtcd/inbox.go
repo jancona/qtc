@@ -16,8 +16,8 @@ import (
 // PUT-with-retry queue (node protocol §6). During the spike every callsign
 // has the same, statically configured member set.
 type mailboxSet struct {
-	r       *Station
-	members []peer.ID
+	r     *Station
+	seeds []peer.ID // configured seed mailbox stations
 
 	mu    sync.Mutex
 	conns map[peer.ID]*memberConn
@@ -42,14 +42,24 @@ func newMailboxSet(r *Station) *mailboxSet {
 			r.log.Error("bad mailbox member peer ID", "member", m, "err", err)
 			continue
 		}
-		s.members = append(s.members, id)
+		s.seeds = append(s.seeds, id)
 	}
 	return s
 }
 
-// membersFor returns the mailbox members for a base callsign. Static during
-// the spike; will read the mailbox record later.
-func (s *mailboxSet) membersFor(envelope.Address) []peer.ID { return s.members }
+// membersFor returns the mailbox members for a base callsign from its
+// record, creating or taking over the record as the node protocol
+// requires. homed says whether this node hears the callsign.
+func (s *mailboxSet) membersFor(base envelope.Address, homed bool) []peer.ID {
+	ctx, cancel := context.WithTimeout(s.r.ctx, 30*time.Second)
+	defer cancel()
+	rec, err := s.r.records.resolve(ctx, base, homed)
+	if err != nil {
+		s.r.log.Warn("no mailbox record", "callsign", base.Base(), "err", err)
+		return nil
+	}
+	return rec.Members
+}
 
 func (s *mailboxSet) conn(id peer.ID) *memberConn {
 	s.mu.Lock()
@@ -185,7 +195,7 @@ func (s *mailboxSet) rewatch(id peer.ID) {
 // member accepts.
 func (s *mailboxSet) putAll(callsign envelope.Address, e *envelope.Envelope, onFirst func()) {
 	base := callsign.Base()
-	members := s.membersFor(base)
+	members := s.membersFor(base, s.r.homes(base))
 	var once sync.Once
 	if s.r.server != nil {
 		// This station is a mailbox: store locally too.

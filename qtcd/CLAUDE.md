@@ -11,5 +11,6 @@ The daemon. Implements `docs/qtc-node-protocol.md` on go-libp2p plus the M17_ine
 - Never deliver the same message ID to the same device twice.
 - libp2p is confined to this package. Measure RSS and goroutines; the Pi Zero 2 W target is real.
 - JSON Lines on `/qtc/0/store`; envelopes are base64 and are never re-encoded.
-- Spike stubs, to be removed in later milestones: the mailbox member set is static (`Config.MailboxMembers`) instead of DHT mailbox records. `Config.Devices` and the loopback admin HTTP interface (`admin.go`) inject devices and messages by hand for testing without a gateway.
+- Mailbox records (`record.go`, `records.go`, node protocol §4, §7.3, §8): signed JSON in the DHT under `/qtc/0/mailbox/<BASE>` with a namespaced validator, announced on `/qtc/0/mailbox-records`, cached with monotonic versions. The first station to home a callsign creates its record; a sender creates a provisional one that the first station to hear the callsign takes over; the home station repairs failed members on its sweep and copies the full history to the recruit. `Config.MailboxMembers` are only seeds for record creation when presence knows no mailbox-capable station. Migration (§8.3) is not implemented.
+- `Config.Devices` and the loopback admin HTTP interface (`admin.go`) inject devices and messages by hand for testing without a gateway.
 - `station_test.go` runs the three-node spike topology in one process. It needs the network stack and takes about 10 s; `go test -short` skips it.

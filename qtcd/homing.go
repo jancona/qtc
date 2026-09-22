@@ -3,6 +3,7 @@ package qtcd
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/jancona/qtc/envelope"
@@ -14,6 +15,17 @@ import (
 type homed struct {
 	base      envelope.Address
 	lastSweep uint32
+	mu        sync.Mutex
+	watched   map[peer.ID]bool // members this node has WATCHed
+	failures  map[peer.ID]int  // consecutive sweeps a member was unreachable
+}
+
+// homes reports whether this node currently homes a base callsign.
+func (r *Station) homes(base envelope.Address) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, ok := r.homed[base.Base()]
+	return ok
 }
 
 // Heard tells the station that a local device was heard, via RF, a local
@@ -33,7 +45,7 @@ func (r *Station) Heard(device envelope.Address, via Via, now uint32) error {
 	h := r.homed[base]
 	fresh := h == nil
 	if fresh {
-		h = &homed{base: base}
+		h = &homed{base: base, watched: map[peer.ID]bool{}, failures: map[peer.ID]int{}}
 		r.homed[base] = h
 	}
 	r.mu.Unlock()
@@ -62,17 +74,7 @@ func (r *Station) home(h *homed) {
 	// reachable yet), retry every 30 seconds rather than at the sweep
 	// interval.
 	for {
-		watched := 0
-		for _, id := range r.mailbox.membersFor(h.base) {
-			ctx, cancel := context.WithTimeout(r.ctx, 30*time.Second)
-			err := r.mailbox.conn(id).watch(ctx, h.base)
-			cancel()
-			if err != nil {
-				r.log.Warn("watch failed", "member", id, "callsign", h.base, "err", err)
-				continue
-			}
-			watched++
-		}
+		watched := r.watchMembers(h, r.mailbox.membersFor(h.base, true))
 		if r.server != nil {
 			watched++ // our own mailbox reports stores through OnStored
 		}
@@ -97,6 +99,35 @@ func (r *Station) home(h *homed) {
 	}
 }
 
+// watchMembers WATCHes any member not yet watched for h and returns how
+// many members are watched in total.
+func (r *Station) watchMembers(h *homed, members []peer.ID) int {
+	for _, id := range members {
+		if id == r.host.ID() {
+			continue
+		}
+		h.mu.Lock()
+		done := h.watched[id]
+		h.mu.Unlock()
+		if done {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(r.ctx, 30*time.Second)
+		err := r.mailbox.conn(id).watch(ctx, h.base)
+		cancel()
+		if err != nil {
+			r.log.Warn("watch failed", "member", id, "callsign", h.base, "err", err)
+			continue
+		}
+		h.mu.Lock()
+		h.watched[id] = true
+		h.mu.Unlock()
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.watched)
+}
+
 // sweep queries every member since the last sweep, unions by StoreID, puts
 // to each member whatever it lacks, applies ROOM state, and replays recent
 // undelivered messages to local devices (node protocol §7.2, §7.1 step 5).
@@ -104,19 +135,38 @@ func (r *Station) home(h *homed) {
 func (r *Station) sweep(h *homed) bool {
 	now := unixNow()
 	since := h.lastSweep
-	members := r.mailbox.membersFor(h.base)
 	ctx, cancel := context.WithTimeout(r.ctx, 2*time.Minute)
 	defer cancel()
+	rec, err := r.records.resolve(ctx, h.base, true)
+	if err != nil {
+		r.log.Warn("sweep: no mailbox record", "callsign", h.base, "err", err)
+		return false
+	}
+	members := rec.Members
+	r.watchMembers(h, members)
 
 	union := map[envelope.ID]*envelope.Envelope{}
 	have := map[peer.ID]map[envelope.ID]bool{}
 	reached := 0
+	var failed []peer.ID
 	for _, id := range members {
+		if id == r.host.ID() {
+			continue // our own store is read below
+		}
 		envs, err := r.mailbox.query(ctx, id, h.base, since)
 		if err != nil {
 			r.log.Warn("sweep query failed", "member", id, "callsign", h.base, "err", err)
+			h.mu.Lock()
+			h.failures[id]++
+			if h.failures[id] >= r.cfg.MemberFailSweeps {
+				failed = append(failed, id)
+			}
+			h.mu.Unlock()
 			continue
 		}
+		h.mu.Lock()
+		h.failures[id] = 0
+		h.mu.Unlock()
 		reached++
 		have[id] = map[envelope.ID]bool{}
 		for _, e := range envs {
@@ -140,6 +190,21 @@ func (r *Station) sweep(h *homed) bool {
 	}
 	if reached == 0 {
 		return false
+	}
+	if len(failed) > 0 && rec.HomeStation == r.host.ID() {
+		// Repair copies the callsign's whole retained history to the
+		// recruit, not just this sweep's increment.
+		if next, err := r.records.repair(ctx, rec, failed, r.fullHistory(ctx, h.base, members)); err != nil {
+			r.log.Warn("mailbox repair failed", "callsign", h.base, "err", err)
+		} else if next != nil {
+			h.mu.Lock()
+			for _, id := range failed {
+				delete(h.failures, id)
+				delete(h.watched, id)
+			}
+			h.mu.Unlock()
+			r.watchMembers(h, next.Members)
+		}
 	}
 	for id, ids := range have {
 		for sid, e := range union {
@@ -347,4 +412,31 @@ func (r *Station) storeRoomMessage(e *envelope.Envelope) {
 		}
 		r.mailbox.putAll(a, e, nil)
 	}
+}
+
+// fullHistory unions everything the reachable members and this node's own
+// store hold for a base callsign.
+func (r *Station) fullHistory(ctx context.Context, base envelope.Address, members []peer.ID) map[envelope.ID]*envelope.Envelope {
+	union := map[envelope.ID]*envelope.Envelope{}
+	for _, id := range members {
+		if id == r.host.ID() {
+			continue
+		}
+		envs, err := r.mailbox.query(ctx, id, base, 0)
+		if err != nil {
+			continue
+		}
+		for _, e := range envs {
+			union[e.StoreID()] = e
+		}
+	}
+	if r.mem != nil {
+		recs, _, _, err := r.mem.Query(base, 0, store.MaxLimit, []envelope.PacketType{envelope.TypeMSG, envelope.TypeRCPT, envelope.TypeROOM})
+		if err == nil {
+			for _, rec := range recs {
+				union[rec.ID()] = rec.Env
+			}
+		}
+	}
+	return union
 }
