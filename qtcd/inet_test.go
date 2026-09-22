@@ -213,14 +213,17 @@ func TestInetFace(t *testing.T) {
 	// until the reflector answers; ACKN back.
 	connRetryInterval = 200 * time.Millisecond
 	gateway.sendTo(t, station, connDatagram(gwCall, 'A'))
+	gateway.expect(t, magicACKN) // answered by the node itself
 	conn, upFrom := upstream.expect(t, magicCONN)
 	if conn[10] != 'C' || envelope.AddressFromBytes(conn[4:10]) != gwCall {
 		t.Errorf("upstream CONN = % x", conn)
 	}
 	upstream.expect(t, magicCONN) // the retry
+	upstream.sendTo(t, upFrom, controlDatagram(magicNACK, 0))
+	upstream.expect(t, magicCONN) // NACK is not final: retried
 	upstream.sendTo(t, upFrom, controlDatagram(magicACKN, 0))
-	gateway.expect(t, magicACKN)
 	upstream.expectNone(t, magicCONN, 500*time.Millisecond)
+	gateway.expectNone(t, magicNACK, 100*time.Millisecond)
 
 	// Stream frames are forwarded upstream and register presence via RF (loopback client).
 	gateway.sendTo(t, station, streamDatagram(w1aw, ht))

@@ -338,6 +338,9 @@ func (f *inetFace) connect(b []byte, addr *net.UDPAddr) {
 	f.mu.Unlock()
 	f.log.Info("client linking", "client", addr, "callsign", s.callsign, "module", string(module),
 		"upstream", f.upstream[module], "upstream_module", string(mod.Module), "mode", mod.Mode)
+	// The client is linked to this node, not to the upstream: answer it now
+	// and manage the upstream link in the background.
+	f.send(addr, controlDatagram(magicACKN, f.core.inetCallsign()))
 	req := append([]byte(nil), b...)
 	req[10] = mod.Module
 	s.connReq = req
@@ -347,9 +350,9 @@ func (f *inetFace) connect(b []byte, addr *net.UDPAddr) {
 	go s.retryConn()
 }
 
-// retryConn resends the upstream CONN until the reflector answers or the
-// session ends. Reflectors drop CONNs silently while a stale link for the
-// same callsign is still timing out.
+// retryConn resends the upstream CONN until the reflector accepts or the
+// session ends. Reflectors drop CONNs silently, or NACK them, while a stale
+// link for the same callsign is still timing out.
 func (s *inetSession) retryConn() {
 	defer s.face.wg.Done()
 	t := time.NewTicker(connRetryInterval)
@@ -603,10 +606,19 @@ func (s *inetSession) readUpstream() {
 		if len(b) < 4 {
 			continue
 		}
-		if m := string(b[:4]); m == magicACKN || m == magicNACK {
+		switch string(b[:4]) {
+		case magicACKN:
 			s.mu.Lock()
+			first := !s.acked
 			s.acked = true
 			s.mu.Unlock()
+			if first {
+				s.face.log.Info("upstream linked", "client", s.client, "upstream", s.up.RemoteAddr())
+			}
+			continue // the client was answered when it linked to us
+		case magicNACK:
+			s.face.log.Warn("upstream refused the link; will retry", "client", s.client, "upstream", s.up.RemoteAddr())
+			continue
 		}
 		if s.qtcMode && string(b[:4]) == magicM17P {
 			if pf, err := parsePacketDatagram(b); err == nil {
