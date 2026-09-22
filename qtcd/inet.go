@@ -450,21 +450,33 @@ func (s *inetSession) ingestEnvelope(pf packetFrame) {
 // local room (rooms §6).
 func (s *inetSession) ingestSMS(pf packetFrame) {
 	now := uint32(time.Now().Unix())
-	node := s.face.core.inetCallsign()
 	dst := pf.dst
-	if dst == node {
+	if isNodeAddress(dst, s.face.core.inetCallsign()) {
 		text := pf.payload[1:]
 		if i := bytes.IndexByte(text, 0); i >= 0 {
 			text = text[:i]
 		}
-		if t := strings.TrimSpace(string(text)); strings.HasPrefix(t, "/") {
+		t := strings.TrimSpace(string(text))
+		switch {
+		case strings.HasPrefix(t, "/"):
 			s.replySMS(pf.src, s.roomCommand(pf.src, t))
 			return
-		}
-		dst = s.face.core.inetLocalRoom()
-		if dst == envelope.AddressZero {
-			s.replySMS(pf.src, "this node has no local room")
-			return
+		case strings.HasPrefix(t, "#"):
+			// "#ROOM text": a message to a named room (rooms spec §6).
+			name, rest, _ := strings.Cut(t, " ")
+			room, err := envelope.RoomAddress(strings.TrimPrefix(name, "#"))
+			if err != nil {
+				s.replySMS(pf.src, "error: "+strings.TrimPrefix(err.Error(), "envelope: "))
+				return
+			}
+			dst = room
+			pf.payload = append([]byte{byte(envelope.TypeSMS)}, append([]byte(strings.TrimSpace(rest)), 0)...)
+		default:
+			dst = s.face.core.inetLocalRoom()
+			if dst == envelope.AddressZero {
+				s.replySMS(pf.src, "this node has no local room")
+				return
+			}
 		}
 	}
 	nonce, err := envelope.NewNonce()
@@ -481,6 +493,22 @@ func (s *inetSession) ingestSMS(pf packetFrame) {
 		s.face.log.Info("SMS not sent", "client", s.client, "envelope", e, "err", err)
 		s.replySMS(pf.src, "not sent: "+err.Error())
 	}
+}
+
+// isNodeAddress reports whether a client addressed the node itself. Runs of
+// spaces are not significant: the module convention pads "N1ADJ  M" to put
+// the letter in the ninth position, but radio UIs collapse or drop the
+// padding, so "N1ADJ M" must reach the node too (node protocol §10).
+func isNodeAddress(dst, node envelope.Address) bool {
+	if dst == node {
+		return true
+	}
+	d, err1 := dst.Text()
+	n, err2 := node.Text()
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	return strings.Join(strings.Fields(d), " ") == strings.Join(strings.Fields(n), " ")
 }
 
 // roomCommand runs a legacy room command and returns the status line.
@@ -574,6 +602,15 @@ func (f *inetFace) deliver(device envelope.Address, e *envelope.Envelope) {
 	if err != nil {
 		return
 	}
+	dst := e.Destination()
+	if name, ok := dst.RoomName(); ok {
+		// A legacy radio cannot show an Extended address, so a room message
+		// is addressed to the device with the room named in the text
+		// (rooms spec §6).
+		dst = device
+		body := append([]byte("#"+name+" "), sms[1:]...)
+		sms = append([]byte{byte(envelope.TypeSMS)}, body...)
+	}
 	f.log.Info("delivering SMS to client", "client", s.client, "device", device, "envelope", e)
-	f.send(s.client, buildPacketDatagram(e.Destination(), e.Source(), sms))
+	f.send(s.client, buildPacketDatagram(dst, e.Source(), sms))
 }

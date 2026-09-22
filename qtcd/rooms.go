@@ -382,10 +382,10 @@ func (s *Subscriptions) Expire(now uint32) []string {
 
 // ParseRoomCommand parses a legacy SMS room command (rooms spec §6):
 // "/join NAME [NAME…]", "/leave NAME [NAME…]", or "/rooms". Matching is
-// case-insensitive. It returns ErrNotCommand if the text does not begin
-// with '/', so the caller can treat it as a message to the local room;
-// ErrUnknownCmd for any other command; and ErrBadRoomName for a name outside
-// §3.1, which includes a '#' prefix.
+// case-insensitive, and a room name may carry the optional '#' prefix. It
+// returns ErrNotCommand if the text does not begin with '/', so the caller
+// can treat it as a message; ErrUnknownCmd for any other command; and
+// ErrBadRoomName for a name outside §3.1.
 func ParseRoomCommand(text string) (envelope.RoomOp, []envelope.Address, error) {
 	text = strings.TrimSpace(text)
 	if !strings.HasPrefix(text, "/") {
@@ -414,7 +414,7 @@ func ParseRoomCommand(text string) (envelope.RoomOp, []envelope.Address, error) 
 	}
 	rooms := make([]envelope.Address, 0, len(fields)-1)
 	for _, name := range fields[1:] {
-		a, err := envelope.RoomAddress(name)
+		a, err := envelope.RoomAddress(strings.TrimPrefix(name, "#"))
 		if err != nil {
 			return 0, nil, fmt.Errorf("%w: %v", ErrBadRoomName, err)
 		}

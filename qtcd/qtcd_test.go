@@ -65,6 +65,7 @@ func startStation(t *testing.T, cfg Config, d *deliveries) *Station {
 	cfg.Log = testLog(t, cfg.Callsign)
 	cfg.Deliver = d.add
 	cfg.SweepInterval = 5 * time.Second
+	cfg.EchoRoomMessages = true
 	cfg.PresenceInterval = 3 * time.Second
 	r, err := New(cfg)
 	if err != nil {

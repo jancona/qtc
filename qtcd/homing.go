@@ -202,6 +202,9 @@ func (r *Station) deliverLocal(e *envelope.Envelope) {
 	}
 	now := unixNow()
 	for _, d := range devices {
+		if dst.IsRoom() && d == e.Source() && !r.cfg.EchoRoomMessages {
+			continue
+		}
 		if !r.markDelivered(e, d) {
 			continue
 		}

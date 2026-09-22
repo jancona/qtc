@@ -260,14 +260,29 @@ func TestInetFace(t *testing.T) {
 	gateway.sendTo(t, station, smsDatagram(node, ht, "/join #MAINE"))
 	reply, _ = gateway.expect(t, magicM17P)
 	pf, _ = parsePacketDatagram(reply)
-	if !bytes.HasPrefix(pf.payload[1:], []byte("error:")) {
+	if !bytes.HasPrefix(pf.payload[1:], []byte("joined MAINE")) {
 		t.Errorf("/join #MAINE reply = %q", pf.payload[1:])
 	}
-	gateway.sendTo(t, station, smsDatagram(node, ht, "everyone here?"))
-	eventually(t, "local room SMS ingested", 2*time.Second, func() bool { return core.sentCount() == 2 })
+	// "#ROOM text" to the node addresses a named room; the marker and name
+	// are stripped from the body. A bad name is answered with an error.
+	gateway.sendTo(t, station, smsDatagram(node, ht, "#MAINE net tonight"))
+	eventually(t, "room-addressed SMS ingested", 2*time.Second, func() bool { return core.sentCount() == 2 })
 	core.mu.Lock()
-	if core.sent[1].Destination() != core.local {
-		t.Errorf("local room message went to %s", core.sent[1].Destination())
+	if m, _ := core.sent[1].Msg(); core.sent[1].Destination() != mustRoom(t, "MAINE") || m.Body() != "net tonight" {
+		t.Errorf("room-addressed SMS became %s", core.sent[1])
+	}
+	core.mu.Unlock()
+	gateway.sendTo(t, station, smsDatagram(node, ht, "#MA.INE bad"))
+	reply, _ = gateway.expect(t, magicM17P)
+	pf, _ = parsePacketDatagram(reply)
+	if !bytes.HasPrefix(pf.payload[1:], []byte("error:")) {
+		t.Errorf("bad room prefix reply = %q", pf.payload[1:])
+	}
+	gateway.sendTo(t, station, smsDatagram(node, ht, "everyone here?"))
+	eventually(t, "local room SMS ingested", 2*time.Second, func() bool { return core.sentCount() == 3 })
+	core.mu.Lock()
+	if core.sent[2].Destination() != core.local {
+		t.Errorf("local room message went to %s", core.sent[2].Destination())
 	}
 	core.mu.Unlock()
 
@@ -275,7 +290,7 @@ func TestInetFace(t *testing.T) {
 	// answered with a ROOM reply packet.
 	native := mustMsg(t, ht, w1aw, 1, 60, 9, 0, "native")
 	gateway.sendTo(t, station, buildPacketDatagram(w1aw, ht, native.Bytes()))
-	eventually(t, "MSG ingested", 2*time.Second, func() bool { return core.sentCount() == 3 })
+	eventually(t, "MSG ingested", 2*time.Second, func() bool { return core.sentCount() == 4 })
 	gateway.sendTo(t, station, buildPacketDatagram(node, ht, mustRoomPkt(t, envelope.OpList, 0).Bytes()))
 	reply, _ = gateway.expect(t, magicM17P)
 	pf, _ = parsePacketDatagram(reply)
@@ -295,6 +310,13 @@ func TestInetFace(t *testing.T) {
 	pf, err = parsePacketDatagram(out)
 	if err != nil || pf.dst != ht || pf.src != w1aw || pf.typ != envelope.TypeSMS || string(pf.payload[1:]) != "for the HT\x00" {
 		t.Errorf("delivered %+v %v", pf, err)
+	}
+	// A room message is delivered to the device with the room named in the text.
+	face.deliver(ht, mustMsg(t, w1aw, mustRoom(t, "MAINE"), 1, 60, 6, 0, "net tonight"))
+	out, _ = gateway.expect(t, magicM17P)
+	pf, err = parsePacketDatagram(out)
+	if err != nil || pf.dst != ht || pf.src != w1aw || string(pf.payload[1:]) != "#MAINE net tonight\x00" {
+		t.Errorf("room delivery %+v %v", pf, err)
 	}
 	rc, _ := envelope.BuildRcpt(w1aw, ht, envelope.ID{}, envelope.StatusDelivered, 1, 0, "")
 	face.deliver(ht, rc)
@@ -317,7 +339,7 @@ func TestInetFace(t *testing.T) {
 	upstream.expect(t, magicM17S)
 	time.Sleep(100 * time.Millisecond)
 	core.mu.Lock()
-	if len(core.heard) != 1 || len(core.sent) != 3 {
+	if len(core.heard) != 1 || len(core.sent) != 4 {
 		t.Errorf("native module published presence or ingested: heard %d sent %d", len(core.heard), len(core.sent))
 	}
 	core.mu.Unlock()

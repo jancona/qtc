@@ -38,7 +38,7 @@ As in the Message Envelope specification, and see Terminology above. "Callsign" 
 
 A room name is 1 to 8 characters from the set `A`–`Z`, `0`–`9`, and `-`. Names are case-insensitive and canonicalized to upper case. `/` and `.` are valid base-40 characters but are excluded from room names to keep them typeable on constrained radio UIs and to leave room for future syntax.
 
-Clients may display a `#` prefix as a visual convention. The prefix is never part of the name or the encoding and is not accepted as input: `#` is not an M17 character, and a name containing it is an error. A radio that presents rooms by menu selection never shows it.
+Clients may display a `#` prefix as a visual convention, and it marks a room name in legacy SMS text (§6): `/join #MAINE` and `/join MAINE` are the same request, and `#MAINE text` addresses the room. The prefix is never part of the name or the encoding; `#` is not an M17 character and never reaches the wire. A radio that presents rooms by menu selection never shows it.
 
 ### 3.2 Encoding
 
@@ -142,9 +142,9 @@ A node replies to every request. A reply to JOIN or LEAVE carries no rooms on su
 
 Clients that speak only SMS interact with rooms as follows.
 
-**Sending.** An SMS whose LSF Destination is a room address is treated as a MSG to that room (per the Message Envelope specification §6) and implicitly joins the sender.
+**Sending.** An SMS whose LSF Destination is a room address is treated as a MSG to that room (per the Message Envelope specification §6) and implicitly joins the sender. Since most radios cannot enter an Extended address, an SMS to the node's own callsign whose text begins with `#NAME ` is likewise a message to room NAME with the marker and name removed from the body; text with neither `/` nor `#` is a message to the local room.
 
-**Receiving.** Room messages are delivered as SMS with the room address in the LSF Destination. Legacy radios will display these as messages addressed to an unfamiliar callsign-like string; that is acceptable.
+**Receiving.** Room messages are delivered as SMS addressed to the device, with the text prefixed `#NAME ` so the user can see which room it came from; a legacy radio cannot display an Extended address in the LSF. A node does not deliver a room message back to the device that sent it unless configured to (useful for testing, noise on the air).
 
 **Control.** An SMS addressed to the node's own callsign whose text begins with `/` is a command:
 
@@ -154,7 +154,7 @@ Clients that speak only SMS interact with rooms as follows.
 | `/leave NAME [NAME…]` | As ROOM LEAVE |
 | `/rooms` | As ROOM LIST |
 
-Names are matched case-insensitively. A name containing `#` (or any other character outside §3.1) is an error. The node replies with an SMS from its own callsign containing a short status line. Unrecognized commands get a one-line error. Commands are only honored from the RF side or from directly connected clients, never from forwarded traffic.
+Names are matched case-insensitively and may carry the optional `#` prefix. A name with any other character outside §3.1 is an error. The node replies with an SMS from its own callsign containing a short status line. Unrecognized commands get a one-line error. Commands are only honored from the RF side or from directly connected clients, never from forwarded traffic.
 
 Since the node's callsign is also its local room name, an SMS to the node callsign that does *not* begin with `/` is a message to the local room, not a command.
 
@@ -196,4 +196,5 @@ No receipts are generated for room messages except REJECTED, per the Message Env
 - **Auto-subscriptions** are node-local, never stored.
 - **Explicit leave is sticky** via a recorded opt-out, cleared only by rejoining or sending.
 - **Node-callsign rooms** with auto-subscription replace `@ALL`.
-- **Room names** are 1–8 characters from `A–Z`, `0–9`, `-`, encoded as a base-40 offset into the Extended range; `#` is a display convention only and is never accepted as input.
+- **Room names** are 1–8 characters from `A–Z`, `0–9`, `-`, encoded as a base-40 offset into the Extended range; `#` marks a room name in text and never reaches the wire.
+- **Legacy room addressing** is `#NAME text` to the node callsign in both directions, since radios cannot enter or display Extended addresses; the sender's own device is not echoed to unless configured.

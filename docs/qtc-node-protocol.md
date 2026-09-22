@@ -191,10 +191,10 @@ For every linked client the node opens an upstream connection to the mapped refl
 **Native mode** is a plain proxy: every packet passes through unchanged in both directions, no presence is published for devices heard on the module, and nothing is delivered to them. **QTC mode** is QTC-only for messaging:
 
 - MSG, RCPT, and ROOM packets from the client are taken into the node and never forwarded. (These are always taken in, whatever the mode, since no reflector understands them.)
-- SMS from the client is wrapped per Message Envelope §6 and sent through QTC; it is not forwarded upstream. An SMS addressed to the node's callsign is a room command if its text begins with `/` (Rooms §6), otherwise a message to the node's local room.
+- SMS from the client is wrapped per Message Envelope §6 and sent through QTC; it is not forwarded upstream. An SMS addressed to the node's callsign is a room command if its text begins with `/`, a message to a named room if it begins with `#NAME `, and otherwise a message to the node's local room (Rooms §6). When matching its own callsign the node ignores the number of spaces: the module convention pads `N1ADJ  M` so the letter sits in the ninth position, but radio UIs collapse the padding and send `N1ADJ M`.
 - Messaging packets (SMS, MSG, RCPT, ROOM) arriving from the upstream reflector are dropped; everything else passes through.
 - The LSF source of every stream frame and packet from the client is published in presence, `via` RF when the client is a gateway (a configured set of addresses, by default the local network) and `via` internet client otherwise.
-- A MSG for a device heard on the module is delivered as SMS (Message Envelope §6) in an M17_inet packet to the client that heard it. Receipts are dropped for legacy clients.
+- A MSG for a device heard on the module is delivered as SMS (Message Envelope §6) in an M17_inet packet to the client that heard it; a room message is addressed to the device with `#NAME ` prefixed to the text (Rooms §6). Receipts are dropped for legacy clients.
 
 In all modes the node never sends the same message ID to the same device twice.
 

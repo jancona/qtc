@@ -80,6 +80,10 @@ type Config struct {
 	// disables it.
 	Inet *InetConfig
 
+	// EchoRoomMessages delivers a room message back to the device that
+	// sent it. Off by default: useful for testing, noise on the air.
+	EchoRoomMessages bool
+
 	PresenceInterval time.Duration // default 5 min
 	SweepInterval    time.Duration // default 1 h
 	ReplayWindow     time.Duration // default 3 h

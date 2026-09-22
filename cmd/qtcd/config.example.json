@@ -10,6 +10,7 @@
   "rooms": [],
   "devices": ["N1ADJ  H"],
   "metrics_interval": "60s",
+  "echo_room_messages": false,
   "admin": "127.0.0.1:8017",
   "inet": {
     "listen": "0.0.0.0:17000",
