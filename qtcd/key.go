@@ -11,6 +11,7 @@ import (
 	"os"
 
 	"github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 // loadOrCreateKey reads an ECDSA P-256 key from a PKCS #8 PEM file, creating
@@ -64,4 +65,17 @@ func libp2pKey(k *ecdsa.PrivateKey) (crypto.PrivKey, error) {
 		return nil, fmt.Errorf("qtcd: libp2p identity: %w", err)
 	}
 	return priv, nil
+}
+
+// LoadOrCreateKey reads the node key at path, creating it if absent. It is
+// exported for the qtc CLI's key commands.
+func LoadOrCreateKey(path string) (*ecdsa.PrivateKey, error) { return loadOrCreateKey(path) }
+
+// PeerIDFromKey derives the libp2p peer ID for a node key.
+func PeerIDFromKey(k *ecdsa.PrivateKey) (peer.ID, error) {
+	lk, err := libp2pKey(k)
+	if err != nil {
+		return "", err
+	}
+	return peer.IDFromPrivateKey(lk)
 }
