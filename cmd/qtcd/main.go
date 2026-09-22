@@ -23,19 +23,20 @@ import (
 
 // fileConfig is the on-disk shape of qtcd.Config.
 type fileConfig struct {
-	Callsign        string   `json:"callsign"`
-	KeyFile         string   `json:"key_file"`
-	Listen          []string `json:"listen"`
-	Bootstrap       []string `json:"bootstrap"`
-	Caps            []string `json:"caps"` // public, relay, mailbox, clients
-	Software        string   `json:"software"`
-	DHT             bool     `json:"dht"`
-	MailboxMembers  []string `json:"mailbox_members"`
-	Rooms           []string `json:"rooms"`
-	Devices         []string `json:"devices"`
-	MetricsInterval string   `json:"metrics_interval"` // Go duration, e.g. "60s"; "" disables
-	Admin           string   `json:"admin"`            // loopback host:port for the admin HTTP interface; "" disables
-	Inet            *struct {
+	Callsign         string   `json:"callsign"`
+	KeyFile          string   `json:"key_file"`
+	Listen           []string `json:"listen"`
+	Bootstrap        []string `json:"bootstrap"`
+	Caps             []string `json:"caps"` // public, relay, mailbox, clients
+	Software         string   `json:"software"`
+	DHT              bool     `json:"dht"`
+	MailboxMembers   []string `json:"mailbox_members"`
+	Rooms            []string `json:"rooms"`
+	Devices          []string `json:"devices"`
+	MetricsInterval  string   `json:"metrics_interval"`   // Go duration, e.g. "60s"; "" disables
+	EchoRoomMessages bool     `json:"echo_room_messages"` // deliver a room message back to its sender\'s device (testing)
+	Admin            string   `json:"admin"`              // loopback host:port for the admin HTTP interface; "" disables
+	Inet             *struct {
 		Listen    string   `json:"listen"`     // UDP address the reflector face listens on, e.g. "0.0.0.0:17000"
 		HostsFile string   `json:"hosts_file"` // M17Hosts.txt for resolving reflector names
 		Gateways  []string `json:"gateways"`   // CIDRs whose clients are RF gateways; default private ranges
@@ -122,15 +123,16 @@ func loadConfig(path string) (qtcd.Config, error) {
 	}
 	adminAddr = fc.Admin
 	cfg := qtcd.Config{
-		Callsign:       fc.Callsign,
-		KeyFile:        fc.KeyFile,
-		ListenAddrs:    fc.Listen,
-		Bootstrap:      fc.Bootstrap,
-		Software:       fc.Software,
-		EnableDHT:      fc.DHT,
-		MailboxMembers: fc.MailboxMembers,
-		Rooms:          fc.Rooms,
-		Devices:        fc.Devices,
+		Callsign:         fc.Callsign,
+		KeyFile:          fc.KeyFile,
+		ListenAddrs:      fc.Listen,
+		Bootstrap:        fc.Bootstrap,
+		Software:         fc.Software,
+		EnableDHT:        fc.DHT,
+		MailboxMembers:   fc.MailboxMembers,
+		Rooms:            fc.Rooms,
+		Devices:          fc.Devices,
+		EchoRoomMessages: fc.EchoRoomMessages,
 	}
 	for _, c := range fc.Caps {
 		switch strings.ToLower(c) {
