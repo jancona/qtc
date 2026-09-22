@@ -500,7 +500,7 @@ func (s *inetSession) ingestSMS(pf packetFrame) {
 			name, rest, _ := strings.Cut(t, " ")
 			room, err := envelope.RoomAddress(strings.TrimPrefix(name, "#"))
 			if err != nil {
-				s.replySMS(pf.src, "error: "+strings.TrimPrefix(err.Error(), "envelope: "))
+				s.replySMS(pf.src, "error: bad room name "+strings.TrimPrefix(name, "#"))
 				return
 			}
 			dst = room
@@ -549,6 +549,12 @@ func isNodeAddress(dst, node envelope.Address) bool {
 func (s *inetSession) roomCommand(device envelope.Address, text string) string {
 	op, rooms, err := ParseRoomCommand(text)
 	if err != nil {
+		if errors.Is(err, ErrBadRoomName) {
+			return "error: bad room name"
+		}
+		if errors.Is(err, ErrUnknownCmd) {
+			return "error: unknown command; try /join /leave /rooms"
+		}
 		return "error: " + strings.TrimPrefix(err.Error(), "qtcd: ")
 	}
 	req, err := envelope.BuildRoom(op, uint32(time.Now().Unix()), rooms, "")

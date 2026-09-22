@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jancona/qtc/envelope"
+	"github.com/jancona/qtc/store"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
@@ -72,6 +73,9 @@ func (r *Station) home(h *homed) {
 			}
 			watched++
 		}
+		if r.server != nil {
+			watched++ // our own mailbox reports stores through OnStored
+		}
 		if watched > 0 && r.sweep(h) {
 			break
 		}
@@ -121,6 +125,19 @@ func (r *Station) sweep(h *homed) bool {
 			union[id2] = e
 		}
 	}
+	var local map[envelope.ID]bool
+	if r.mem != nil {
+		// This station's own mailbox is a member too.
+		recs, _, _, err := r.mem.Query(h.base, since, store.MaxLimit, []envelope.PacketType{envelope.TypeMSG, envelope.TypeRCPT, envelope.TypeROOM})
+		if err == nil {
+			reached++
+			local = map[envelope.ID]bool{}
+			for _, rec := range recs {
+				local[rec.ID()] = true
+				union[rec.ID()] = rec.Env
+			}
+		}
+	}
 	if reached == 0 {
 		return false
 	}
@@ -128,6 +145,15 @@ func (r *Station) sweep(h *homed) bool {
 		for sid, e := range union {
 			if !ids[sid] {
 				r.go_(func() { r.mailbox.putRetry(id, h.base, e, nil, nil) })
+			}
+		}
+	}
+	if local != nil {
+		for sid, e := range union {
+			if !local[sid] {
+				if _, err := r.server.PutLocal(h.base, e); err != nil {
+					r.log.Debug("local mailbox refused sweep envelope", "id", sid, "err", err)
+				}
 			}
 		}
 	}

@@ -22,6 +22,10 @@ type Server struct {
 	Now func() uint32
 	// Log receives protocol-level warnings; nil uses slog.Default.
 	Log *slog.Logger
+	// OnStored, if set, is called (on its own goroutine) for every envelope
+	// newly stored, whether by a PUT on a stream or by PutLocal. A station
+	// that is itself a mailbox member uses it in place of WATCHing itself.
+	OnStored func(callsign envelope.Address, e *envelope.Envelope)
 
 	mu       sync.Mutex
 	watchers map[envelope.Address]map[*conn]struct{}
@@ -139,9 +143,35 @@ func (s *Server) put(c *conn, m message) error {
 		return err
 	}
 	if stored {
-		s.notify(callsign, e)
+		s.stored(callsign, e)
 	}
 	return nil
+}
+
+// stored fans a newly stored envelope out to watchers and OnStored.
+func (s *Server) stored(callsign envelope.Address, e *envelope.Envelope) {
+	s.notify(callsign, e)
+	if s.OnStored != nil {
+		go s.OnStored(callsign, e)
+	}
+}
+
+// PutLocal stores an envelope as if it had arrived by PUT, applying the
+// same policy, and reports whether it was new. A refusal is a *PutError.
+func (s *Server) PutLocal(callsign envelope.Address, e *envelope.Envelope) (bool, error) {
+	now := s.now()
+	exp, err := s.Policy.Expiry(e, now)
+	if err != nil {
+		return false, err
+	}
+	stored, err := s.Store.Put(Record{Callsign: callsign.Base(), Env: e, ReceivedAt: now, Expiry: exp})
+	if err != nil {
+		return false, err
+	}
+	if stored {
+		s.stored(callsign.Base(), e)
+	}
+	return stored, nil
 }
 
 func (s *Server) query(c *conn, m message) error {

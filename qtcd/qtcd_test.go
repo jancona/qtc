@@ -110,7 +110,7 @@ func TestThreeNodeSpike(t *testing.T) {
 		t.Skip("network-heavy")
 	}
 	var dP, dA, dB deliveries
-	pub := startStation(t, Config{Callsign: "K1XYZ  R", Caps: CapPublic | CapRelay | CapMailbox, Software: "test"}, &dP)
+	pub := startStation(t, Config{Callsign: "K1XYZ  R", Caps: CapPublic | CapRelay | CapMailbox, Software: "test", Devices: []string{"AB1CD"}}, &dP)
 	pubAddr := pub.AddrInfo()
 	var bootstrap []string
 	for _, a := range pubAddr.Addrs {
@@ -175,6 +175,25 @@ func TestThreeNodeSpike(t *testing.T) {
 	if n := dA.count(isRcpt(envelope.StatusQueued)); n != 1 {
 		t.Errorf("QUEUED delivered %d times", n)
 	}
+
+	// The public station is its own mailbox: a message for its device AB1CD
+	// arrives through the store's OnStored hook, with no stream to itself.
+	ab1cd := mustAddr(t, "AB1CD")
+	toPub := mustMsg(t, n1adjH, ab1cd, unixNow(), 60, 0x77, envelope.FlagRcptReq, "for the public station")
+	if err := a.Send(toPub); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "delivery at the public station's own device", 20*time.Second, func() bool {
+		_, ok := dP.find(func(d delivery) bool { return d.device == ab1cd && d.env.ID() == toPub.ID() })
+		return ok
+	})
+	eventually(t, "TRANSMITTED from the public station", 20*time.Second, func() bool {
+		_, ok := dA.find(func(d delivery) bool {
+			rc, ok := d.env.Rcpt()
+			return ok && rc.MessageID() == toPub.ID() && rc.Status() == envelope.StatusTransmitted && d.env.Source() == pub.Callsign()
+		})
+		return ok
+	})
 
 	// Presence: A learns that B stations W1AW, and both see the public station's card.
 	eventually(t, "presence", 20*time.Second, func() bool {

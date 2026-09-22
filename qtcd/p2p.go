@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jancona/qtc/envelope"
 	"github.com/jancona/qtc/store"
 	"github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
@@ -96,6 +97,7 @@ func (r *Station) startP2P() error {
 		r.server = store.NewServer(r.mem)
 		r.server.Policy = store.Policy{DefaultTTL: r.cfg.DefaultTTL}
 		r.server.Log = r.log
+		r.server.OnStored = func(c envelope.Address, e *envelope.Envelope) { r.onStored(c, e, h.ID()) }
 		h.SetStreamHandler(store.ProtocolID, func(s network.Stream) {
 			defer s.Close()
 			if err := r.server.Serve(s); err != nil {

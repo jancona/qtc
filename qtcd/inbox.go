@@ -186,11 +186,20 @@ func (s *mailboxSet) rewatch(id peer.ID) {
 func (s *mailboxSet) putAll(callsign envelope.Address, e *envelope.Envelope, onFirst func()) {
 	base := callsign.Base()
 	members := s.membersFor(base)
-	if len(members) == 0 {
+	var once sync.Once
+	if s.r.server != nil {
+		// This station is a mailbox: store locally too.
+		stored, err := s.r.server.PutLocal(base, e)
+		switch {
+		case err != nil:
+			s.r.log.Warn("local mailbox refused envelope", "callsign", base, "id", e.StoreID(), "err", err)
+		case stored && onFirst != nil:
+			once.Do(onFirst)
+		}
+	} else if len(members) == 0 {
 		s.r.log.Warn("no mailbox members configured; envelope not stored", "callsign", base, "envelope", e)
 		return
 	}
-	var once sync.Once
 	for _, id := range members {
 		id := id
 		s.r.go_(func() { s.putRetry(id, base, e, &once, onFirst) })
