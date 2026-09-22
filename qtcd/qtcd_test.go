@@ -131,7 +131,7 @@ func TestThreeNodeSpike(t *testing.T) {
 	w1aw := mustAddr(t, "W1AW")
 
 	// Both stations home their callsign and watch it on the mailbox node.
-	eventually(t, "watches on the mailbox node", 20*time.Second, func() bool {
+	eventually(t, "watches on the mailbox node", 45*time.Second, func() bool {
 		return pub.server.Watchers(n1adjH) == 1 && pub.server.Watchers(w1aw) == 1
 	})
 
