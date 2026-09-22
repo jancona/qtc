@@ -108,12 +108,18 @@ type inetSession struct {
 	last    time.Time
 	heardAt map[envelope.Address]time.Time
 	closed  bool
-	acked   bool   // upstream answered our CONN
-	connReq []byte // the CONN/LSTN as sent upstream, resent until acked
+	acked   bool      // upstream answered our CONN
+	lastUp  time.Time // last PING or PONG from upstream
+	connReq []byte    // the CONN/LSTN as sent upstream, resent until acked
 }
 
-// connRetryInterval is how often an unanswered upstream CONN is resent.
-var connRetryInterval = 5 * time.Second
+// Link keepalive timing. The node PINGs its client like any reflector, and
+// relinks upstream when the reflector has been silent for upstreamSilence.
+var (
+	connRetryInterval  = 5 * time.Second
+	clientPingInterval = 3 * time.Second
+	upstreamSilence    = 30 * time.Second
+)
 
 const heardRateLimit = 5 * time.Second
 
@@ -280,7 +286,14 @@ func (f *inetFace) handleClient(b []byte, addr *net.UDPAddr) {
 		return
 	}
 	s.touch()
+	if magic != magicM17S && magic != magicM17P {
+		s.face.log.Debug("control from client", "client", addr, "magic", magic)
+	}
 	switch magic {
+	case magicPONG:
+		// Our PING answered; nothing to forward, the upstream link is ours.
+	case magicPING:
+		f.send(addr, controlDatagram(magicPONG, f.core.inetCallsign()))
 	case magicDISC:
 		s.forwardUp(b)
 		f.mu.Lock()
@@ -345,9 +358,31 @@ func (f *inetFace) connect(b []byte, addr *net.UDPAddr) {
 	req[10] = mod.Module
 	s.connReq = req
 	s.forwardUp(req)
-	f.wg.Add(2)
+	f.wg.Add(3)
 	go s.readUpstream()
 	go s.retryConn()
+	go s.pingClient()
+}
+
+// pingClient keeps the client's link alive the way a reflector does.
+func (s *inetSession) pingClient() {
+	defer s.face.wg.Done()
+	t := time.NewTicker(clientPingInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-s.face.ctx.Done():
+			return
+		case <-t.C:
+		}
+		s.mu.Lock()
+		closed := s.closed
+		s.mu.Unlock()
+		if closed {
+			return
+		}
+		s.face.send(s.client, controlDatagram(magicPING, s.face.core.inetCallsign()))
+	}
 }
 
 // retryConn resends the upstream CONN until the reflector accepts or the
@@ -364,10 +399,18 @@ func (s *inetSession) retryConn() {
 		case <-t.C:
 		}
 		s.mu.Lock()
-		done := s.acked || s.closed
-		s.mu.Unlock()
-		if done {
+		if s.closed {
+			s.mu.Unlock()
 			return
+		}
+		if s.acked && time.Since(s.lastUp) > upstreamSilence {
+			s.acked = false
+			s.face.log.Warn("upstream silent; relinking", "client", s.client, "upstream", s.face.upstream[s.module])
+		}
+		acked := s.acked
+		s.mu.Unlock()
+		if acked {
+			continue
 		}
 		s.face.log.Debug("resending upstream CONN", "client", s.client, "upstream", s.face.upstream[s.module])
 		s.forwardUp(s.connReq)
@@ -612,11 +655,28 @@ func (s *inetSession) readUpstream() {
 		if len(b) < 4 {
 			continue
 		}
+		if m := string(b[:4]); m != magicM17S && m != magicM17P {
+			s.face.log.Debug("control from upstream", "client", s.client, "magic", m)
+		}
 		switch string(b[:4]) {
+		case magicPING:
+			// Answer as the client would, and do not forward: the client's
+			// link is kept alive by the node's own PINGs.
+			s.forwardUp(controlDatagram(magicPONG, s.callsign))
+			s.mu.Lock()
+			s.lastUp = time.Now()
+			s.mu.Unlock()
+			continue
+		case magicPONG:
+			s.mu.Lock()
+			s.lastUp = time.Now()
+			s.mu.Unlock()
+			continue
 		case magicACKN:
 			s.mu.Lock()
 			first := !s.acked
 			s.acked = true
+			s.lastUp = time.Now()
 			s.mu.Unlock()
 			if first {
 				s.face.log.Info("upstream linked", "client", s.client, "upstream", s.up.RemoteAddr())

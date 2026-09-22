@@ -92,3 +92,25 @@ Setup: an m17-gateway hotspot (`cc1200trixie`, CC1200 modem, callsign `N1ADJ   C
 - The station published presence for the radio's callsign (`N1ADJ 8`, via RF) within the first presence interval, and the public station's table showed it. The station homed N1ADJ and auto-subscribed it to the local room.
 
 Not yet tested: SMS in either direction, since the radio's firmware at hand has no SMS support. The room command and message paths are covered by the in-process client face test and wait for a radio that can send SMS.
+
+## Milestones 2 and 3: SMS on the air (2026-09-22)
+
+Same hotspot and laptop station as the first run, radio now an OpenRTX CS7000 with SMS. The public station ran on the laptop too (the Pi 5 was reachable but not needed), hearing a test device `N0CALL` through its configuration.
+
+Every planned test passed on the air:
+
+- **Room commands.** `/rooms` and `/join TEST` sent as SMS to the node callsign were answered by SMS from the node.
+- **Room message.** `#TEST net tonight at 7` to the node callsign was stored as a message to room TEST with the marker stripped, and echoed back to the radio (echo enabled for the test) within 5 ms of receipt.
+- **Unicast out.** SMS to `N0CALL` was delivered at the public station's device.
+- **Unicast in.** A MSG from `N0CALL` with a receipt request reached the radio as SMS within a second; QUEUED and TRANSMITTED receipts came back to N0CALL, the latter carrying the radio's last-heard time.
+- **Bad room name.** `#MA.INE hello` was answered with an error SMS. The first attempt's reply, with quoted names and an apostrophe, was transmitted but not seen on the radio; a plain `error: bad room name MA.INE` was.
+- **Undeliverable.** SMS to `W1AW` landed in W1AW's mailbox and nothing was transmitted.
+- **Native mode.** On module B, three packets and a voice transmission passed to M17-M17 with no mailbox change and no presence published.
+
+Bugs and conventions that came out of the run, all fixed and in the specs:
+
+- The radio sent the node callsign as `N1ADJ M`, one space; the node now matches its callsign ignoring runs of spaces (node protocol §10).
+- Legacy radios cannot enter Extended addresses, so `#NAME text` to the node callsign addresses a room, and room messages are delivered as SMS to the device with `#NAME ` prefixed. Commands accept an optional `#`. Echo to the sender's device is a configuration option, off by default (rooms §3.1, §6).
+- The echo option was not wired into the daemon's config parsing at first.
+- A station that is itself a mailbox never saw its own stores; the store now reports them through a hook and local puts and sweeps include the station's own store.
+- Relinking through the proxy was fragile: the station did not DISC upstream on shutdown, so the reflector kept a stale link and NACKed the next CONN, and the gateway treated NACK as final. The node now answers the client's CONN itself, resends an unanswered upstream CONN, and after one case where M17-M17 acknowledged but never pinged, owns both keepalives: it PINGs its client and answers the reflector's PINGs, relinking upstream after 30 s of silence (node protocol §10).

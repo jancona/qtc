@@ -233,11 +233,20 @@ func TestInetFace(t *testing.T) {
 		defer core.mu.Unlock()
 		return len(core.heard) == 1 && core.heard[0] == ht && core.vias[0] == ViaRF
 	})
-	// A reflector PING is forwarded down; the gateway's PONG is forwarded up.
+	// The node answers reflector PINGs itself and PINGs the gateway itself;
+	// neither side's keepalive crosses the node.
+	clientPingInterval = 200 * time.Millisecond
 	upstream.sendTo(t, upFrom, controlDatagram(magicPING, 0))
-	gateway.expect(t, magicPING)
+	pong, _ := upstream.expect(t, magicPONG)
+	if envelope.AddressFromBytes(pong[4:10]) != gwCall {
+		t.Errorf("upstream PONG carries %s, want the gateway callsign", envelope.AddressFromBytes(pong[4:10]))
+	}
+	ping, _ := gateway.expect(t, magicPING)
+	if envelope.AddressFromBytes(ping[4:10]) != node {
+		t.Errorf("node PING carries %s", envelope.AddressFromBytes(ping[4:10]))
+	}
 	gateway.sendTo(t, station, controlDatagram(magicPONG, gwCall))
-	upstream.expect(t, magicPONG)
+	upstream.expectNone(t, magicPONG, 200*time.Millisecond)
 
 	// SMS on a qtc module becomes a MSG and is not forwarded.
 	gateway.sendTo(t, station, smsDatagram(w1aw, ht, "  hello qtc  "))
