@@ -1,6 +1,8 @@
 # QTC documentation
 
-Read in this order:
+Running QTC: [`operator-guide.md`](operator-guide.md) for hotspot and station operators; [`user-guide.md`](user-guide.md) for radio users.
+
+Design, for developers. Read in this order:
 
 1. `qtc-architecture.md` — roles, trust, identity, message flow, milestones
 2. `qtc-envelope.md` — MSG/RCPT packet types
