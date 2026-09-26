@@ -20,26 +20,31 @@ import (
 // version accepted per callsign so a stale record cannot roll one back.
 type recordStore struct {
 	r     *Station
-	topic *pubsub.Topic
+	topic *pubsub.Topic // set before any goroutine starts; nil if the join failed
 
 	mu      sync.Mutex
 	cache   map[envelope.Address]*MailboxRecord
 	fetched map[envelope.Address]time.Time // last DHT read per callsign
 }
 
+// newRecordStore joins the announcement topic here, not in run, so that a
+// record written while run is starting never races the join.
 func newRecordStore(r *Station) *recordStore {
-	return &recordStore{r: r, cache: map[envelope.Address]*MailboxRecord{}, fetched: map[envelope.Address]time.Time{}}
-}
-
-// run joins the announcement topic and applies records it hears.
-func (rs *recordStore) run() {
-	t, err := rs.r.ps.Join(MailboxRecordsTopic)
+	rs := &recordStore{r: r, cache: map[envelope.Address]*MailboxRecord{}, fetched: map[envelope.Address]time.Time{}}
+	t, err := r.ps.Join(MailboxRecordsTopic)
 	if err != nil {
-		rs.r.log.Error("join mailbox records topic", "err", err)
-		return
+		r.log.Error("join mailbox records topic", "err", err)
 	}
 	rs.topic = t
-	sub, err := t.Subscribe()
+	return rs
+}
+
+// run applies the records it hears on the announcement topic.
+func (rs *recordStore) run() {
+	if rs.topic == nil {
+		return
+	}
+	sub, err := rs.topic.Subscribe()
 	if err != nil {
 		rs.r.log.Error("subscribe mailbox records topic", "err", err)
 		return
