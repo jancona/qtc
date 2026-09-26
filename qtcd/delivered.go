@@ -21,7 +21,9 @@ const deliveredRetention = 0xFFFF*time.Minute + time.Hour
 
 // deliveredTable is the delivered-once table (node protocol §7.4): which message
 // has gone to which device, and when. With a journal it survives a restart,
-// so a restart never repeats a delivery.
+// so a restart never repeats a delivery. A message skipped by the replay cap
+// is recorded the same way, so it never comes back; the room address stands
+// in for a device to dedup messages arriving on a room topic.
 type deliveredTable struct {
 	mu   sync.Mutex
 	done map[deliveryKey]uint32 // delivery time
@@ -34,11 +36,16 @@ type deliveryKey struct {
 	device envelope.Address
 }
 
-// deliveryLine is one line of the delivered journal.
+// deliveryLine is one line of the delivered journal. Device is a callsign,
+// or "#NAME" for a room (envelope.Address.String). Skipped marks a message
+// the replay cap left out (for reading the journal; it loads as delivered).
+// Forget undoes an earlier line: a delivery that could not be handed off.
 type deliveryLine struct {
-	ID     string `json:"id"`
-	Device string `json:"device"`
-	At     uint32 `json:"at"`
+	ID      string `json:"id"`
+	Device  string `json:"device"`
+	At      uint32 `json:"at"`
+	Skipped bool   `json:"skipped,omitempty"`
+	Forget  bool   `json:"forget,omitempty"`
 }
 
 func newDeliveredTable() *deliveredTable {
@@ -59,7 +66,10 @@ func openDeliveredTable(path string, now uint32, log *slog.Logger) (*deliveredTa
 		if err != nil {
 			return err
 		}
-		if dl.At >= cutoff {
+		switch {
+		case dl.Forget:
+			delete(d.done, k)
+		case dl.At >= cutoff:
 			d.done[k] = dl.At
 		}
 		return nil
@@ -83,7 +93,7 @@ func (dl deliveryLine) key() (deliveryKey, error) {
 	if err != nil || len(b) != len(envelope.ID{}) {
 		return deliveryKey{}, fmt.Errorf("qtcd: delivered journal: bad id %q", dl.ID)
 	}
-	dev, err := envelope.EncodeAddress(dl.Device)
+	dev, err := envelope.ParseAddress(dl.Device)
 	if err != nil {
 		return deliveryKey{}, err
 	}
@@ -94,19 +104,54 @@ func (dl deliveryLine) key() (deliveryKey, error) {
 // A journal failure is logged, not fatal: the cost is at most one repeat
 // delivery after a restart.
 func (d *deliveredTable) mark(k deliveryKey, now uint32) bool {
+	return d.record(k, now, false)
+}
+
+// skip records a message the replay cap left out, so that it is never
+// offered to the device again. It reports false if it was already recorded.
+func (d *deliveredTable) skip(k deliveryKey, now uint32) bool {
+	return d.record(k, now, true)
+}
+
+func (d *deliveredTable) record(k deliveryKey, now uint32, skipped bool) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if _, done := d.done[k]; done {
 		return false
 	}
 	d.done[k] = now
-	if d.j != nil {
-		dev, _ := k.device.Text()
-		if err := d.j.Append(deliveryLine{ID: k.id.String(), Device: dev, At: now}); err != nil {
-			d.log.Warn("delivered journal append failed", "err", err)
-		}
-	}
+	d.append(deliveryLine{ID: k.id.String(), Device: k.device.String(), At: now, Skipped: skipped})
 	return true
+}
+
+// has reports whether k is recorded.
+func (d *deliveredTable) has(k deliveryKey) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	_, done := d.done[k]
+	return done
+}
+
+// forget removes k after a delivery that was marked but could not be handed
+// off, so the message can be delivered later.
+func (d *deliveredTable) forget(k deliveryKey) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if _, done := d.done[k]; !done {
+		return
+	}
+	delete(d.done, k)
+	d.append(deliveryLine{ID: k.id.String(), Device: k.device.String(), Forget: true})
+}
+
+// append journals one line. Callers hold d.mu.
+func (d *deliveredTable) append(l deliveryLine) {
+	if d.j == nil {
+		return
+	}
+	if err := d.j.Append(l); err != nil {
+		d.log.Warn("delivered journal append failed", "err", err)
+	}
 }
 
 // expire forgets deliveries older than the retention period and compacts
@@ -132,8 +177,7 @@ func (d *deliveredTable) expire(now uint32) {
 func (d *deliveredTable) compact() error {
 	return d.j.Rewrite(func(emit func(any) error) error {
 		for k, at := range d.done {
-			dev, _ := k.device.Text()
-			if err := emit(deliveryLine{ID: k.id.String(), Device: dev, At: at}); err != nil {
+			if err := emit(deliveryLine{ID: k.id.String(), Device: k.device.String(), At: at}); err != nil {
 				return err
 			}
 		}

@@ -62,7 +62,7 @@ A **station** for a callsign is any node currently holding state for it because 
 3. The station puts the envelope on every mailbox member and on the sender's own mailbox, retrying until all accept. If the sender requested it, the station issues a QUEUED receipt.
 4. Every station that homes the recipient has the recipient's mailbox nodes on watch and is notified immediately. Each transmits once on RF or delivers to its clients, and issues TRANSMITTED with the recipient's last-heard time at that station.
 5. A native client that receives the message issues DELIVERED, which is put on the sender's mailbox like any other envelope.
-6. A station newly homing the recipient sweeps the mailbox: queries all members since its last sync, unions, fills gaps, and replays recent messages that carry no DELIVERED.
+6. A station newly homing the recipient sweeps the mailbox: queries all members since its last sync, unions, fills gaps, and replays the messages that carry no DELIVERED, at most ten per device (Node Protocol §7.5). A station delivers only to a radio heard within the last hour; messages for one that has gone away wait for its return.
 
 Rooms use gossipsub topics instead of mailboxes; see the Rooms specification.
 

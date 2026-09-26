@@ -130,5 +130,6 @@ Restore the gateway (`sudo cp /etc/m17-gateway.ini.pre-qtc /etc/m17-gateway.ini`
 - Radio UIs send `N1ADJ M`, one space; the node matches its callsign ignoring space runs.
 - Stopping a station without DISC left M17-M17 holding the old link and refusing the next CONN; fixed in code, but a killed station still leaves a stale link for the reflector's timeout.
 - A freshly started station has an empty presence table for up to one presence interval; records created in that window see fewer candidates.
-- With `DataDir` set, mailboxes and the delivered-once table are journaled there (`mailbox.jsonl`, `delivered.jsonl`) and survive a restart. Without it they are in memory: a restart empties them and the replay window can redeliver. `DataDir` also defaults the key to `<DataDir>/node.key`, so pointing it at `~/qtcd` keeps the existing peer ID.
+- With `DataDir` set, mailboxes and the delivered-once table are journaled there (`mailbox.jsonl`, `delivered.jsonl`) and survive a restart. Without it they are in memory: a restart empties them and can repeat deliveries. `DataDir` also defaults the key to `<DataDir>/node.key`, so pointing it at `~/qtcd` keeps the existing peer ID.
+- A device heard more than an hour ago (`[Delivery] ReachWindow`) gets nothing until it is heard again: injected test devices go quiet after an hour. Re-inject with `POST /heard`.
 - A temporary directory holding test keys and configs may not outlive the session; keep test configs somewhere durable.

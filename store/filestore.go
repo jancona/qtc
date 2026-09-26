@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"strconv"
-	"strings"
 	"sync"
 
 	"github.com/jancona/qtc/envelope"
@@ -136,7 +134,7 @@ func (s *FileStore) compact() error {
 
 func encodeRecord(rec Record) journalRecord {
 	return journalRecord{
-		Callsign:   addrText(rec.Callsign),
+		Callsign:   rec.Callsign.String(),
 		ReceivedAt: rec.ReceivedAt,
 		Expiry:     rec.Expiry,
 		Env:        base64.StdEncoding.EncodeToString(rec.Env.Bytes()),
@@ -148,7 +146,7 @@ func decodeRecord(line []byte) (Record, error) {
 	if err := json.Unmarshal(line, &jr); err != nil {
 		return Record{}, err
 	}
-	call, err := parseAddrText(jr.Callsign)
+	call, err := envelope.ParseAddress(jr.Callsign)
 	if err != nil {
 		return Record{}, err
 	}
@@ -161,28 +159,4 @@ func decodeRecord(line []byte) (Record, error) {
 		return Record{}, err
 	}
 	return Record{Callsign: call, Env: e, ReceivedAt: jr.ReceivedAt, Expiry: jr.Expiry}, nil
-}
-
-// addrText writes a mailbox key readably: callsign text, "#NAME" for a room,
-// or hex for anything else.
-func addrText(a envelope.Address) string {
-	if name, ok := a.RoomName(); ok {
-		return "#" + name
-	}
-	if t, err := a.Text(); err == nil {
-		return t
-	}
-	return fmt.Sprintf("0x%012X", uint64(a))
-}
-
-func parseAddrText(s string) (envelope.Address, error) {
-	switch {
-	case strings.HasPrefix(s, "#"):
-		return envelope.RoomAddress(s[1:])
-	case strings.HasPrefix(s, "0x"):
-		v, err := strconv.ParseUint(s[2:], 16, 48)
-		return envelope.Address(v), err
-	default:
-		return envelope.EncodeAddress(s)
-	}
 }

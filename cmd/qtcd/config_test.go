@@ -40,6 +40,9 @@ func TestLoadExampleConfig(t *testing.T) {
 	if c.Software == "" {
 		t.Error("Software not defaulted")
 	}
+	if c.ReachWindow != time.Hour || c.ReplayLimit != 10 {
+		t.Errorf("Delivery: reach %v limit %d", c.ReachWindow, c.ReplayLimit)
+	}
 	if c.Inet == nil {
 		t.Fatal("no client face")
 	}
@@ -128,6 +131,7 @@ func TestConfigErrors(t *testing.T) {
 		{"duration", "[General]\nCallsign=N1ADJ  P\n[Timers]\nSweepInterval=hourly\n", "[Timers] SweepInterval: \"hourly\" is not a duration"},
 		{"bool", "[General]\nCallsign=N1ADJ  P\n[Network]\nDHT=maybe\n", "[Network] DHT: \"maybe\" is not true or false"},
 		{"int", "[General]\nCallsign=N1ADJ  P\n[Network]\nK=two\n", "[Network] K: \"two\" is not a whole number"},
+		{"reach", "[General]\nCallsign=N1ADJ  P\n[Delivery]\nReachWindow=an hour\n", "[Delivery] ReachWindow: \"an hour\" is not a duration"},
 		{"cap", "[General]\nCallsign=N1ADJ  P\n[Network]\nCaps=public,mailbx\n", "unknown capability \"mailbx\""},
 		{"cidr", "[General]\nCallsign=N1ADJ  P\n[Inet]\nGateways=10.0.0.0\n[Module A]\nReflector=M17-M17\nModule=C\nMode=qtc\n", "Gateways: \"10.0.0.0\" is not a CIDR"},
 		{"inet without module", "[General]\nCallsign=N1ADJ  P\n[Inet]\n", "needs at least one [Module X]"},

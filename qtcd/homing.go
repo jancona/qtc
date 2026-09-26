@@ -1,8 +1,10 @@
 package qtcd
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -14,7 +16,8 @@ import (
 // homed is the state for one base callsign this node homes (node protocol §7).
 type homed struct {
 	base      envelope.Address
-	lastSweep uint32
+	sweepMu   sync.Mutex // one sweep at a time, so replays never overlap
+	lastSweep uint32     // guarded by sweepMu
 	mu        sync.Mutex
 	watched   map[peer.ID]bool // members this node has WATCHed
 	failures  map[peer.ID]int  // consecutive sweeps a member was unreachable
@@ -31,11 +34,14 @@ func (r *Station) homes(base envelope.Address) bool {
 // Heard tells the station that a local device was heard, via RF, a local
 // client, or an internet client. It publishes presence, auto-subscribes the
 // callsign to the local room, and begins homing the base callsign if it is
-// not already homed: WATCH on every mailbox member, then a sweep.
+// not already homed: WATCH on every mailbox member, then a sweep. A device
+// of a callsign already homed that is heard again after being out of reach,
+// or that has messages held for it, gets a full sweep and replay.
 func (r *Station) Heard(device envelope.Address, via Via, now uint32) error {
 	if !device.IsStandard() {
 		return fmt.Errorf("%w: %s", ErrNotCallsign, device)
 	}
+	wasReachable := r.reachable(device, now)
 	r.presence.heard(device, via, now)
 	if err := r.subs.Heard(device, now); err != nil {
 		return err
@@ -48,10 +54,16 @@ func (r *Station) Heard(device envelope.Address, via Via, now uint32) error {
 		h = &homed{base: base, watched: map[peer.ID]bool{}, failures: map[peer.ID]int{}}
 		r.homed[base] = h
 	}
+	held := r.held[device]
+	delete(r.held, device)
 	r.mu.Unlock()
-	if fresh {
+	switch {
+	case fresh:
 		r.log.Info("homing", "callsign", base, "device", device, "via", via)
 		r.go_(func() { r.home(h) })
+	case held || !wasReachable:
+		r.log.Info("device back in reach; replaying", "device", device, "held", held)
+		r.go_(func() { r.sweepSince(h, 0) })
 	}
 	return nil
 }
@@ -133,8 +145,19 @@ func (r *Station) watchMembers(h *homed, members []peer.ID) int {
 // undelivered messages to local devices (node protocol §7.2, §7.1 step 5).
 // It reports whether any member was reached.
 func (r *Station) sweep(h *homed) bool {
+	return r.sweepSince(h, -1)
+}
+
+// sweepSince sweeps from a given time; -1 means since the last sweep, 0
+// means everything the mailbox holds.
+func (r *Station) sweepSince(h *homed, from int64) bool {
+	h.sweepMu.Lock()
+	defer h.sweepMu.Unlock()
 	now := unixNow()
 	since := h.lastSweep
+	if from >= 0 {
+		since = uint32(from)
+	}
 	ctx, cancel := context.WithTimeout(r.ctx, 2*time.Minute)
 	defer cancel()
 	rec, err := r.records.resolve(ctx, h.base, true)
@@ -230,7 +253,7 @@ func (r *Station) sweep(h *homed) bool {
 			delivered[rc.MessageID()] = true
 		}
 	}
-	window := uint32(r.cfg.ReplayWindow / time.Second)
+	var replay []*envelope.Envelope
 	for _, e := range union {
 		switch e.Type() {
 		case envelope.TypeROOM:
@@ -238,19 +261,17 @@ func (r *Station) sweep(h *homed) bool {
 				r.log.Debug("stored ROOM envelope not applied", "callsign", h.base, "err", err)
 			}
 		case envelope.TypeMSG:
-			if delivered[e.ID()] {
-				continue
+			if !delivered[e.ID()] {
+				replay = append(replay, e)
 			}
-			ts := e.Timestamp()
-			if ts != 0 && now-ts > window {
-				continue
-			}
-			r.deliverLocal(e)
 		case envelope.TypeRCPT:
 			r.deliverLocal(e)
 		}
 	}
-	h.lastSweep = now
+	r.replay(replay, now)
+	if now > h.lastSweep {
+		h.lastSweep = now
+	}
 	r.log.Debug("sweep done", "callsign", h.base, "members_reached", reached, "envelopes", len(union))
 	return true
 }
@@ -269,10 +290,24 @@ func (r *Station) onStored(callsign envelope.Address, e *envelope.Envelope, from
 	}
 }
 
-// deliverLocal delivers a MSG or RCPT to the local devices it addresses,
-// once per message ID and device (node protocol §7.4), issuing TRANSMITTED
-// when a MSG asked for a receipt.
+// Delivery to local devices (node protocol §7.4). A device is reachable
+// while it was heard within ReachWindow. A message for a device that is out
+// of reach, or whose gateway link is down, is held: it stays undelivered in
+// the mailbox, and the device gets a replay when it is next heard.
+
+// deliverLocal delivers a MSG or RCPT to the local devices it addresses.
 func (r *Station) deliverLocal(e *envelope.Envelope) {
+	now := unixNow()
+	for _, d := range r.targets(e) {
+		r.deliverOne(e, d, now)
+	}
+}
+
+// targets returns the local devices e addresses: every device of a base
+// callsign, the one device a suffixed callsign names, or every device of a
+// room's subscribers, less the sender's own device for a room message
+// unless EchoRoomMessages is set.
+func (r *Station) targets(e *envelope.Envelope) []envelope.Address {
 	dst := e.Destination()
 	var devices []envelope.Address
 	switch {
@@ -282,7 +317,11 @@ func (r *Station) deliverLocal(e *envelope.Envelope) {
 			if err != nil {
 				continue
 			}
-			devices = append(devices, r.presence.localDevices(a)...)
+			for _, d := range r.presence.localDevices(a) {
+				if d != e.Source() || r.cfg.EchoRoomMessages {
+					devices = append(devices, d)
+				}
+			}
 		}
 	case dst.IsStandard():
 		if dst.Base() == dst {
@@ -291,19 +330,114 @@ func (r *Station) deliverLocal(e *envelope.Envelope) {
 			devices = []envelope.Address{dst}
 		}
 	}
-	now := unixNow()
-	for _, d := range devices {
-		if dst.IsRoom() && d == e.Source() && !r.cfg.EchoRoomMessages {
-			continue
+	return devices
+}
+
+// deliverOne hands e to device d once (node protocol §7.4), issuing
+// TRANSMITTED when a MSG asked for a receipt, and reports whether it did. A
+// MSG for a device out of reach or without a working link is held.
+func (r *Station) deliverOne(e *envelope.Envelope, d envelope.Address, now uint32) bool {
+	k := deliveryKey{id: e.StoreID(), device: d}
+	if !r.reachable(d, now) {
+		if e.Type() == envelope.TypeMSG && !r.delivered.has(k) {
+			r.hold(d, e)
 		}
-		if !r.markDelivered(e, d) {
-			continue
+		return false
+	}
+	if !r.delivered.mark(k, now) {
+		return false
+	}
+	if !r.deliverTo(d, e) {
+		// Marked first so concurrent paths cannot both send; undone
+		// because nothing was sent.
+		r.delivered.forget(k)
+		if e.Type() == envelope.TypeMSG {
+			r.hold(d, e)
 		}
-		r.deliverTo(d, e)
-		if m, ok := e.Msg(); ok && m.RcptReq() && !dst.IsRoom() {
-			r.issueReceipt(e, envelope.StatusTransmitted, r.presence.lastHeard(d), now)
+		return false
+	}
+	if m, ok := e.Msg(); ok && m.RcptReq() && !e.Destination().IsRoom() {
+		r.issueReceipt(e, envelope.StatusTransmitted, r.presence.lastHeard(d), now)
+	}
+	return true
+}
+
+// reachable reports whether device was heard within ReachWindow.
+func (r *Station) reachable(device envelope.Address, now uint32) bool {
+	last := r.presence.lastHeard(device)
+	return last != 0 && uint64(last)+uint64(r.cfg.ReachWindow/time.Second) >= uint64(now)
+}
+
+// hold notes that a message is waiting for device, so the next time the
+// device is heard it gets a replay.
+func (r *Station) hold(d envelope.Address, e *envelope.Envelope) {
+	r.mu.Lock()
+	r.held[d] = true
+	r.mu.Unlock()
+	r.log.Debug("held for device", "device", d, "envelope", e)
+}
+
+// replay delivers the messages a sweep found without a DELIVERED receipt
+// (node protocol §7.1): to each reachable local device, the ReplayLimit
+// most recent it has not had, oldest first. Older ones are recorded as
+// skipped so they never come back, and the device gets one notice saying
+// how many.
+func (r *Station) replay(msgs []*envelope.Envelope, now uint32) {
+	pending := map[envelope.Address][]*envelope.Envelope{}
+	for _, e := range msgs {
+		for _, d := range r.targets(e) {
+			if !r.delivered.has(deliveryKey{id: e.StoreID(), device: d}) {
+				pending[d] = append(pending[d], e)
+			}
 		}
 	}
+	for d, list := range pending {
+		if !r.reachable(d, now) {
+			r.hold(d, list[0])
+			continue
+		}
+		sort.Slice(list, func(i, j int) bool {
+			if ti, tj := list[i].Timestamp(), list[j].Timestamp(); ti != tj {
+				return ti < tj
+			}
+			a, b := list[i].ID(), list[j].ID()
+			return bytes.Compare(a[:], b[:]) < 0
+		})
+		skipped := 0
+		if n := len(list) - r.cfg.ReplayLimit; n > 0 {
+			for _, e := range list[:n] {
+				if r.delivered.skip(deliveryKey{id: e.StoreID(), device: d}, now) {
+					skipped++
+				}
+			}
+			list = list[n:]
+		}
+		if skipped > 0 {
+			r.notice(d, skipped, now)
+		}
+		sent := 0
+		for _, e := range list {
+			if r.deliverOne(e, d, now) {
+				sent++
+			}
+		}
+		r.log.Info("replayed", "device", d, "sent", sent, "skipped", skipped)
+	}
+}
+
+// notice tells a device, in a message from the node, how many older
+// messages the replay cap left out. It is not stored or journaled.
+func (r *Station) notice(d envelope.Address, skipped int, now uint32) {
+	text := fmt.Sprintf("%d older messages not sent", skipped)
+	if skipped == 1 {
+		text = "1 older message not sent"
+	}
+	e, err := envelope.BuildMsg(r.callsign, d, now, r.cfg.DefaultTTL, uint16(now), 0, text)
+	if err != nil {
+		r.log.Warn("build replay notice", "err", err)
+		return
+	}
+	r.deliverTo(d, e)
 }
 
 // markDelivered records a (message, device) delivery, returning false if it

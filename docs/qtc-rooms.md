@@ -183,7 +183,7 @@ No receipts are generated for room messages except REJECTED, per the Message Env
 ## 8. Open Questions
 
 1. **Room list on the radio.** A ROOM LIST reply of a few dozen rooms is fine; a radio that wants to *discover* rooms has no mechanism here. Is a "rooms this node carries" query wanted, or is discovery a social problem?
-2. **Backlog on RF.** Delivering backlog to a radio user means transmitting old messages on the repeater. Is the right default "backlog to IP clients only," with RF getting only new traffic?
+2. **Backlog on RF.** Delivering backlog to a radio user means transmitting old messages on the repeater. Is the right default "backlog to IP clients only," with RF getting only new traffic? (Messages already addressed to a user and held while their radio was out of reach are a separate case, capped at ten on return: Node Protocol §7.5.)
 3. **Extended-range use.** The M17 specification opens the Extended range to applications without a registry, so nothing prevents another application from using the same values for something else. Worth raising with the M17 working group once the design settles.
 
 ## 9. Resolved

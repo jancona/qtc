@@ -93,6 +93,16 @@ func (p *presence) heard(device envelope.Address, via Via, now uint32) {
 }
 
 // lastHeard returns when a local device was last heard; 0 if never.
+// localVia returns how a local device was last heard; 0 if never.
+func (p *presence) localVia(device envelope.Address) Via {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if d := p.local[device]; d != nil {
+		return d.via
+	}
+	return 0
+}
+
 func (p *presence) lastHeard(device envelope.Address) uint32 {
 	p.mu.Lock()
 	defer p.mu.Unlock()

@@ -1,0 +1,134 @@
+package qtcd
+
+import (
+	"fmt"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/jancona/qtc/envelope"
+)
+
+func bodyOf(e *envelope.Envelope) string {
+	m, _ := e.Msg()
+	return m.Body()
+}
+
+// TestReplayCap: a replay sends the ReplayLimit most recent messages oldest
+// first, after one notice for the rest, which never come back.
+func TestReplayCap(t *testing.T) {
+	var got deliveries
+	r := startStation(t, Config{Callsign: "N1ADJ  Z"}, &got)
+	ht, w1aw := mustAddr(t, "N1ADJ  H"), mustAddr(t, "W1AW")
+	now := unixNow()
+	r.presence.heard(ht, ViaLocal, now)
+
+	var msgs []*envelope.Envelope
+	for i := 14; i >= 0; i-- { // out of order on purpose
+		msgs = append(msgs, mustMsg(t, w1aw, ht, now-1000+uint32(i), 60, uint16(i), 0, fmt.Sprintf("m%02d", i)))
+	}
+	r.replay(msgs, now)
+
+	var bodies []string
+	for _, d := range got.list {
+		bodies = append(bodies, bodyOf(d.env))
+	}
+	want := []string{"5 older messages not sent", "m05", "m06", "m07", "m08", "m09", "m10", "m11", "m12", "m13", "m14"}
+	if fmt.Sprint(bodies) != fmt.Sprint(want) {
+		t.Fatalf("replay sent %q\nwant %q", bodies, want)
+	}
+	if got.list[0].env.Source() != r.Callsign() {
+		t.Errorf("notice from %s, want the node", got.list[0].env.Source())
+	}
+	for _, e := range msgs {
+		if !r.delivered.has(deliveryKey{id: e.StoreID(), device: ht}) {
+			t.Errorf("%s neither delivered nor recorded as skipped", bodyOf(e))
+		}
+	}
+
+	r.replay(msgs, now)
+	if n := len(got.list); n != len(want) {
+		t.Errorf("second replay sent %d more", n-len(want))
+	}
+}
+
+// TestHeldUntilHeard: messages for a device out of reach wait in the
+// mailbox and are replayed, capped, when the device is heard again.
+func TestHeldUntilHeard(t *testing.T) {
+	var got deliveries
+	// A lone mailbox station: its own peer ID seeds its records.
+	key := filepath.Join(t.TempDir(), "node.key")
+	probe, err := New(Config{Callsign: "N1ADJ  Z", KeyFile: key})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := probe.PeerID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := startStation(t, Config{Callsign: "N1ADJ  Z", KeyFile: key, Caps: CapMailbox, MailboxMembers: []string{id.String()}}, &got)
+	ht, w1aw := mustAddr(t, "N1ADJ  H"), mustAddr(t, "W1AW")
+	now := unixNow()
+	if err := r.Heard(ht, ViaLocal, now-2*3600); err != nil { // last heard two hours ago
+		t.Fatal(err)
+	}
+	eventually(t, "homing", 5*time.Second, func() bool { return r.homes(ht) })
+
+	for i := 0; i < 12; i++ {
+		if _, err := r.server.PutLocal(ht, mustMsg(t, w1aw, ht, now-100+uint32(i), 60, uint16(i), 0, fmt.Sprintf("m%02d", i))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	time.Sleep(500 * time.Millisecond)
+	if n := got.count(func(delivery) bool { return true }); n != 0 {
+		t.Fatalf("%d messages sent to a device out of reach", n)
+	}
+
+	if err := r.Heard(ht, ViaLocal, now); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "replay", 10*time.Second, func() bool { return got.count(func(delivery) bool { return true }) == 11 })
+	got.mu.Lock()
+	first, last := bodyOf(got.list[0].env), bodyOf(got.list[10].env)
+	got.mu.Unlock()
+	if first != "2 older messages not sent" || last != "m11" {
+		t.Errorf("replay began %q and ended %q", first, last)
+	}
+
+	// Heard again while in reach, with nothing held: no second replay.
+	if err := r.Heard(ht, ViaLocal, now+10); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(500 * time.Millisecond)
+	if n := got.count(func(delivery) bool { return true }); n != 11 {
+		t.Errorf("%d deliveries after hearing an in-reach device again, want 11", n)
+	}
+}
+
+// TestHandoffFailureHolds: a device heard through the M17_inet face whose
+// link is down does not get the message marked delivered; it is held.
+func TestHandoffFailureHolds(t *testing.T) {
+	var got deliveries
+	r := startStation(t, Config{Callsign: "N1ADJ  Z", Inet: &InetConfig{
+		Listen:  "127.0.0.1:0",
+		Modules: map[byte]ModuleConfig{'A': {Reflector: "127.0.0.1:9", Module: 'C', Mode: ModeQTC}},
+	}}, &got)
+	ht, w1aw := mustAddr(t, "N1ADJ  H"), mustAddr(t, "W1AW")
+	now := unixNow()
+	r.presence.heard(ht, ViaRF, now) // heard over RF, but no gateway session now
+	e := mustMsg(t, w1aw, ht, now, 60, 1, 0, "hello")
+
+	r.deliverLocal(e)
+	if r.delivered.has(deliveryKey{id: e.StoreID(), device: ht}) {
+		t.Error("marked delivered with no link to hand it to")
+	}
+	r.mu.Lock()
+	held := r.held[ht]
+	r.mu.Unlock()
+	if !held {
+		t.Error("not held")
+	}
+	if n := got.count(func(delivery) bool { return true }); n != 0 {
+		t.Errorf("%d deliveries recorded", n)
+	}
+}

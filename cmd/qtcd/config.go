@@ -21,16 +21,18 @@ import (
 //	[Network]  Listen, Bootstrap, Caps, DHT, MailboxMembers, K
 //	[Timers]   PresenceInterval, SweepInterval, RecordRefresh,
 //	           TakeoverPeriod, MemberFailSilence, MemberFailSweeps
+//	[Delivery] ReachWindow, ReplayLimit
 //	[Inet]     Listen, HostsFile, Gateways, AllowCallsigns
 //	[Module X] Reflector, Module, Mode   (one per module letter X)
 //
 // The client face runs when there is an [Inet] section or any [Module X].
 var configKeys = map[string][]string{
-	"general": {"callsign", "datadir", "keyfile", "admin", "software", "metricsinterval", "devices", "rooms", "echoroommessages"},
-	"network": {"listen", "bootstrap", "caps", "dht", "mailboxmembers", "k"},
-	"timers":  {"presenceinterval", "sweepinterval", "recordrefresh", "takeoverperiod", "memberfailsilence", "memberfailsweeps"},
-	"inet":    {"listen", "hostsfile", "gateways", "allowcallsigns"},
-	"module":  {"reflector", "module", "mode"},
+	"general":  {"callsign", "datadir", "keyfile", "admin", "software", "metricsinterval", "devices", "rooms", "echoroommessages"},
+	"network":  {"listen", "bootstrap", "caps", "dht", "mailboxmembers", "k"},
+	"timers":   {"presenceinterval", "sweepinterval", "recordrefresh", "takeoverperiod", "memberfailsilence", "memberfailsweeps"},
+	"delivery": {"reachwindow", "replaylimit"},
+	"inet":     {"listen", "hostsfile", "gateways", "allowcallsigns"},
+	"module":   {"reflector", "module", "mode"},
 }
 
 // fileConfig is a loaded config file: the station config plus the settings
@@ -63,7 +65,7 @@ func parseConfig(f *ini.File) (fileConfig, error) {
 	var errs []string
 	fail := func(format string, a ...any) { errs = append(errs, fmt.Sprintf(format, a...)) }
 
-	gen, nw, tm := f.Section("general"), f.Section("network"), f.Section("timers")
+	gen, nw, tm, dl := f.Section("general"), f.Section("network"), f.Section("timers"), f.Section("delivery")
 	fc := fileConfig{Admin: str(gen, "admin")}
 	cfg := &fc.Config
 	cfg.Callsign = str(gen, "callsign")
@@ -118,6 +120,7 @@ func parseConfig(f *ini.File) (fileConfig, error) {
 		{tm, "recordrefresh", &cfg.RecordRefresh},
 		{tm, "takeoverperiod", &cfg.TakeoverPeriod},
 		{tm, "memberfailsilence", &cfg.MemberFailSilence},
+		{dl, "reachwindow", &cfg.ReachWindow},
 	} {
 		if s := str(d.sec, d.key); s != "" {
 			v, err := time.ParseDuration(s)
@@ -129,6 +132,7 @@ func parseConfig(f *ini.File) (fileConfig, error) {
 		}
 	}
 	cfg.MemberFailSweeps = integer(tm, "memberfailsweeps", fail)
+	cfg.ReplayLimit = integer(dl, "replaylimit", fail)
 
 	modules := moduleSections(f)
 	if f.HasSection("inet") || len(modules) > 0 {
@@ -197,7 +201,7 @@ func checkKeys(f *ini.File) error {
 		}
 		allowed, ok := configKeys[kind]
 		if !ok {
-			errs = append(errs, fmt.Sprintf("unknown section [%s] (General, Network, Timers, Inet, Module X)", name))
+			errs = append(errs, fmt.Sprintf("unknown section [%s] (General, Network, Timers, Delivery, Inet, Module X)", name))
 			continue
 		}
 		for _, k := range sec.Keys() {
@@ -285,7 +289,7 @@ var keyNames = map[string]string{}
 func init() {
 	for _, k := range []string{"Callsign", "DataDir", "KeyFile", "Admin", "Software", "MetricsInterval", "Devices", "Rooms", "EchoRoomMessages",
 		"Listen", "Bootstrap", "Caps", "DHT", "MailboxMembers", "K", "PresenceInterval", "SweepInterval", "RecordRefresh",
-		"TakeoverPeriod", "MemberFailSilence", "MemberFailSweeps", "HostsFile", "Gateways", "AllowCallsigns", "Reflector", "Module", "Mode"} {
+		"TakeoverPeriod", "MemberFailSilence", "MemberFailSweeps", "ReachWindow", "ReplayLimit", "HostsFile", "Gateways", "AllowCallsigns", "Reflector", "Module", "Mode"} {
 		keyNames[strings.ToLower(k)] = k
 	}
 }

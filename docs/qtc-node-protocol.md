@@ -136,7 +136,7 @@ A station *homes* a base callsign from the moment it hears any of its devices un
 2. Read the mailbox record. If none, create one (§4) with this node as home station.
 3. Open `/qtc/0/store` streams to each member and WATCH the callsign.
 4. Run a sweep (§7.2).
-5. Replay to the local device any message from the sweep whose origin timestamp is within the replay window (default 3 hours) and for which no DELIVERED receipt exists in the mailbox. Native clients dedup by message ID; legacy radios may see repeats.
+5. Replay to the local device (§7.5).
 
 ### 7.2 Sweep
 
@@ -148,7 +148,11 @@ A station that creates a record for a callsign it has never heard (because a loc
 
 ### 7.4 Delivery
 
-On EVENT, or on a message found by a sweep, a station delivers once per local device that the destination addresses (all devices if the destination has no suffix; only the matching device if it has one), issuing TRANSMITTED with that device's `last` heard time if RCPT_REQ was set. It never delivers the same message ID to the same device twice. It remembers each delivery for the delivered-once retention (§11), across restarts: a mailbox can offer a message again at any time while it holds it (a repair copies history to a recruit, whose EVENT reaches every watcher), so the retention outlasts the longest TTL an envelope can carry.
+On EVENT, or on a message found by a sweep, a station delivers once per local device that the destination addresses (all devices if the destination has no suffix; only the matching device if it has one) and that is *in reach*: heard within the reach window (§11). It issues TRANSMITTED with that device's `last` heard time if RCPT_REQ was set. A MSG for a device out of reach, or one the station cannot hand to the device's link (a gateway that is not linked at that moment), is *held*: not recorded as delivered, left in the mailbox, and replayed when the device is next heard (§7.5). It never delivers the same message ID to the same device twice. It remembers each delivery for the delivered-once retention (§11), across restarts: a mailbox can offer a message again at any time while it holds it (a repair copies history to a recruit, whose EVENT reaches every watcher), so the retention outlasts the longest TTL an envelope can carry.
+
+### 7.5 Replay
+
+A station replays when it starts homing a callsign, and when it hears a device of a callsign it already homes that was out of reach or has held messages. It sweeps from time 0 (§7.2) and, for each local device in reach, takes the MSGs the device has not had and for which no DELIVERED receipt exists. It sends at most the replay limit (§11) of them, the most recent, oldest first. It records the older ones as delivered so they are never offered again, and first sends the device one MSG from the node callsign saying how many it left out (for example "7 older messages not sent"). The limit bounds what a returning radio is sent on RF; the TTL bounds how old a message can be. Native clients can still QUERY the mailbox for anything the limit left out.
 
 ## 8. Home stations and Repair
 
@@ -209,7 +213,8 @@ A consequence to be aware of: a user on a qtc-mode module can exchange messages 
 | Presence expiry | 30 days after last heard |
 | Silent node expiry | 7 days |
 | Active window | 24 h |
-| Replay window | 3 h |
+| Reach window | 1 h since the device was last heard (provisional, §12 item 1) |
+| Replay limit | 10 messages per device |
 | Sweep interval while active | 1 h |
 | Member failure period | 24 h silent and 3 failed sweeps |
 | Home station takeover period | 7 days silent |
@@ -220,7 +225,7 @@ A consequence to be aware of: a user on a qtc-mode module can exchange messages 
 
 ## 12. Open Questions
 
-1. **Presence establishment on the radio side.** Deliberately unresolved; see Architecture §10.
+1. **Presence establishment on the radio side.** Deliberately unresolved; see Architecture §10. The reach window (§7.4, §11) is a provisional answer for delivery: a legacy radio counts as present for an hour after it last transmitted, so messages for a radio that has gone away wait for its return instead of being transmitted to no one, at the cost of holding messages for a radio that listens without transmitting. Revisit with presence establishment.
 2. **Presence topic scale.** One gossipsub topic for all presence is fine to a few thousand nodes. Beyond that, regional topics or per-callsign-prefix sharding; nothing here precludes it.
 3. **DHT validator limits.** The validator can enforce signature and version but not the home station convention. A malicious node can still overwrite a record; readers preferring `writer == home station` mitigates but does not prevent it. User-signed records are the real fix.
 4. **Quotas.** Per-writer and per-callsign PUT limits on mailbox nodes, and limits on record creation, are needed before public deployment and are not specified.

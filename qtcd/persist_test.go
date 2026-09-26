@@ -113,3 +113,42 @@ func TestStationRestart(t *testing.T) {
 		t.Error("delivery repeated after restart")
 	}
 }
+
+// TestDeliveredTableRoomsAndForget: room entries (the room address standing
+// in for a device) and forgotten deliveries survive a reload correctly.
+func TestDeliveredTableRoomsAndForget(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "delivered.jsonl")
+	now := uint32(1789128000)
+	room := deliveryKey{id: envelope.ID{1}, device: mustRoom(t, "NET")}
+	gone := deliveryKey{id: envelope.ID{2}, device: mustAddr(t, "N1ADJ  H")}
+	skipped := deliveryKey{id: envelope.ID{3}, device: mustAddr(t, "N1ADJ  H")}
+
+	d, err := openDeliveredTable(path, now, testLog(t, "d"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.mark(room, now)
+	d.mark(gone, now)
+	d.forget(gone)
+	d.skip(skipped, now)
+	d.close()
+	b, _ := os.ReadFile(path)
+	if !strings.Contains(string(b), `"device":"#NET"`) || !strings.Contains(string(b), `"skipped":true`) {
+		t.Errorf("journal:\n%s", b)
+	}
+
+	d, err = openDeliveredTable(path, now, testLog(t, "d"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.close()
+	if !d.has(room) {
+		t.Error("room entry lost on reload")
+	}
+	if d.has(gone) {
+		t.Error("forgotten delivery came back on reload")
+	}
+	if !d.has(skipped) {
+		t.Error("skipped message lost on reload")
+	}
+}

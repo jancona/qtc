@@ -95,7 +95,8 @@ type Config struct {
 
 	PresenceInterval  time.Duration // default 5 min
 	SweepInterval     time.Duration // default 1 h
-	ReplayWindow      time.Duration // default 3 h
+	ReachWindow       time.Duration // a device heard this recently is reachable; others' messages are held; default 1 h
+	ReplayLimit       int           // most messages a device is sent on replay; default 10
 	ActiveWindow      time.Duration // default 24 h
 	MetricsInterval   time.Duration // 0 disables the metrics log
 	RecordRefresh     time.Duration // how long a cached mailbox record is trusted before rereading the DHT; default 5 min
@@ -114,8 +115,11 @@ func (c *Config) defaults() {
 	if c.SweepInterval == 0 {
 		c.SweepInterval = time.Hour
 	}
-	if c.ReplayWindow == 0 {
-		c.ReplayWindow = 3 * time.Hour
+	if c.ReachWindow == 0 {
+		c.ReachWindow = time.Hour
+	}
+	if c.ReplayLimit <= 0 {
+		c.ReplayLimit = 10
 	}
 	if c.ActiveWindow == 0 {
 		c.ActiveWindow = 24 * time.Hour
@@ -171,6 +175,7 @@ type Station struct {
 	server   *store.Server
 
 	delivered *deliveredTable
+	held      map[envelope.Address]bool // devices with a message waiting; guarded by mu
 
 	mu     sync.Mutex
 	homed  map[envelope.Address]*homed // by base callsign
@@ -224,6 +229,7 @@ func New(cfg Config) (*Station, error) {
 		subs:      subs,
 		homed:     map[envelope.Address]*homed{},
 		delivered: newDeliveredTable(),
+		held:      map[envelope.Address]bool{},
 		queued:    map[envelope.ID]struct{}{},
 	}
 	if cfg.Deliver == nil {
@@ -358,12 +364,17 @@ func (r *Station) Presence() *presence { return r.presence }
 
 func unixNow() uint32 { return uint32(time.Now().Unix()) }
 
-// deliverTo hands an envelope to every delivery sink for a device.
-func (r *Station) deliverTo(device envelope.Address, e *envelope.Envelope) {
-	r.cfg.Deliver(device, e)
-	if r.inet != nil {
-		r.inet.deliver(device, e)
+// deliverTo hands an envelope to a device and reports whether it went. A
+// device heard through the M17_inet face needs its gateway or client link
+// up; a device given by config or the admin interface always takes it.
+func (r *Station) deliverTo(device envelope.Address, e *envelope.Envelope) bool {
+	if via := r.presence.localVia(device); r.inet != nil && (via == ViaRF || via == ViaInternet) {
+		if !r.inet.deliver(device, e) {
+			return false
+		}
 	}
+	r.cfg.Deliver(device, e)
+	return true
 }
 
 func (r *Station) runExpiry() {

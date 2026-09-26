@@ -733,20 +733,22 @@ func (s *inetSession) readUpstream() {
 
 // deliver sends a MSG to a device as SMS through the session that heard it.
 // Receipts are dropped for legacy clients (envelope §6).
-func (f *inetFace) deliver(device envelope.Address, e *envelope.Envelope) {
+func (f *inetFace) deliver(device envelope.Address, e *envelope.Envelope) bool {
 	f.mu.Lock()
 	s := f.devices[device]
 	f.mu.Unlock()
 	if s == nil {
-		return
+		f.log.Info("no link to device; held", "device", device)
+		return false
 	}
 	if e.Type() != envelope.TypeMSG {
 		f.log.Debug("receipt not delivered to legacy client", "device", device, "envelope", e)
-		return
+		return true
 	}
 	sms, err := envelope.ToSMS(e)
 	if err != nil {
-		return
+		f.log.Warn("cannot send as SMS", "device", device, "envelope", e, "err", err)
+		return true
 	}
 	dst := e.Destination()
 	if name, ok := dst.RoomName(); ok {
@@ -759,4 +761,5 @@ func (f *inetFace) deliver(device envelope.Address, e *envelope.Envelope) {
 	}
 	f.log.Info("delivering SMS to client", "client", s.client, "device", device, "envelope", e)
 	f.send(s.client, buildPacketDatagram(dst, e.Source(), sms))
+	return true
 }
