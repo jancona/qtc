@@ -78,7 +78,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "qtcd: bad log level %q\n", *logLevel)
 		os.Exit(2)
 	}
-	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+	journal := underJournal()
+	log := newLogger(os.Stderr, level, journal)
 	slog.SetDefault(log)
 
 	cfg, err := loadConfig(*path)
@@ -108,8 +109,12 @@ func main() {
 		log.Error("start", "err", err)
 		os.Exit(1)
 	}
-	for _, a := range r.AddrInfo().Addrs {
-		fmt.Printf("%s/p2p/%s\n", a, r.ID())
+	if !journal {
+		// For copying into another node's bootstrap list; under systemd the
+		// "station started" log line carries the same addresses.
+		for _, a := range r.AddrInfo().Addrs {
+			fmt.Printf("%s/p2p/%s\n", a, r.ID())
+		}
 	}
 	if adminAddr != "" {
 		if _, err := r.ServeAdmin(adminAddr); err != nil {
