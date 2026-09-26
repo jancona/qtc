@@ -55,7 +55,7 @@ Depends on `github.com/jancona/m17`, checked out alongside and resolved via `go.
 
 Milestones 1–4 are done (`docs/qtc-architecture.md` §9, results in `docs/spike-results.md`). Now: milestone 5, an invite-only test with known hotspot operators and internet-only users. Exit criteria are in §9.
 
-Order: persistence (JSONL journal around `MemStore`, delivered-once table) and the `inet.allow_callsigns` allowlist → `.deb`, systemd, CI releases, hotspot-installer fork → `qtc chat` and the `app/` GUI (desktop and Android) → operator and user guides → onboarding with ham.n1adj.net as the public station. Quotas and user keys stay deferred; don't pull them in.
+Done: persistence, the `[Inet] AllowCallsigns` allowlist, the `.deb` and release CI, the hotspot-installer fork (jancona/m17-hotspot-installer, branch `qtc`), INI config (`/etc/qtcd.ini`, parsed in `cmd/qtcd/config.go` with `gopkg.in/ini.v1` like m17-gateway; unknown keys are errors). Next: operator guide → `qtc chat` and the `app/` GUI (desktop and Android) → user guide → onboarding with ham.n1adj.net as the public station. Quotas and user keys stay deferred; don't pull them in.
 
 Every change must still run alongside a normal hotspot install on a Pi Zero 2 W without visibly degrading it.
 

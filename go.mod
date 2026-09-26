@@ -8,6 +8,7 @@ require (
 	github.com/libp2p/go-libp2p-kad-dht v0.42.2
 	github.com/libp2p/go-libp2p-pubsub v0.17.0
 	github.com/multiformats/go-multiaddr v0.16.1
+	gopkg.in/ini.v1 v1.67.0
 )
 
 require (

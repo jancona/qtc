@@ -34,7 +34,7 @@ for cmd in qtcd qtc; do
 done
 
 install -m 0644 "$SRC/qtcd.service" "$ROOT/usr/lib/systemd/system/"
-install -m 0644 "$SRC/qtcd.json.sample" "$ROOT/usr/share/qtcd/"
+install -m 0644 "$SRC/qtcd.ini.sample" "$ROOT/usr/share/qtcd/"
 install -m 0644 LICENSE "$ROOT/usr/share/doc/qtcd/copyright"
 sed -e "s/VERSION_PLACEHOLDER/${VERSION}/" -e "s/ARCH_PLACEHOLDER/${ARCH}/" \
     "$SRC/debian/control" > "$ROOT/DEBIAN/control"

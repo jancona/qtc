@@ -1,0 +1,31 @@
+; QTC node configuration for a hotspot. The package wrote this file from
+; your gateway's settings; edit it and run: sudo systemctl restart qtcd
+; Every setting is described in the operator guide:
+; https://github.com/jancona/qtc/blob/main/docs/operator-guide.md
+
+[General]
+; This node's callsign: your base callsign, module letter Q ninth.
+Callsign=CALLSIGN_PLACEHOLDER
+; Node key and stored messages. Keep this directory across upgrades.
+DataDir=/var/lib/qtcd
+; Local status page: curl -s localhost:8017/status
+Admin=127.0.0.1:8017
+MetricsInterval=15m
+
+[Network]
+; The test network's public station.
+Bootstrap=/dns4/ham.n1adj.net/tcp/4001/p2p/QmdxViFZP4PK5TL3xANxScyaFnvBfdqfbQqjjJGhvJvuSg
+
+[Inet]
+; Loopback only: the gateway runs on this Pi. It links to this node as
+; reflector M17-QTC (OverrideHosts.txt: M17-QTC 127.0.0.1 17000).
+Listen=127.0.0.1:17000
+HostsFile=HOSTS_FILE_PLACEHOLDER
+
+; Module A is what the gateway links to. Voice passes through to the
+; reflector and module below, the ones your gateway used before; SMS goes
+; into QTC.
+[Module A]
+Reflector=REFLECTOR_PLACEHOLDER
+Module=MODULE_PLACEHOLDER
+Mode=qtc

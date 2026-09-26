@@ -2,18 +2,21 @@
 #
 # postinst for qtcd.
 #
-# A new install writes /etc/qtcd.json from the sample:
+# A new install writes /etc/qtcd.ini from the sample:
 #   - callsign: QTCD_CALLSIGN if set (the hotspot installer passes it), else
 #     the gateway's callsign from /etc/m17-gateway.ini, else a prompt on an
 #     interactive terminal. The node uses the base callsign with module Q.
 #   - upstream: the gateway's current reflector and module, so voice keeps
 #     going where it went before the gateway is pointed at M17-QTC.
-# An existing /etc/qtcd.json is never touched.
+# An existing /etc/qtcd.ini is never touched. A 0.1.0~rc1 /etc/qtcd.json
+# (the format before INI) is set aside as /etc/qtcd.json.rc1 and a new
+# config is written; the node key in /var/lib/qtcd is kept.
 
 set -e
 
-CONFIG=/etc/qtcd.json
-SAMPLE=/usr/share/qtcd/qtcd.json.sample
+CONFIG=/etc/qtcd.ini
+SAMPLE=/usr/share/qtcd/qtcd.ini.sample
+OLD_JSON=/etc/qtcd.json
 STATE=/var/lib/qtcd
 GATEWAY_INI=/etc/m17-gateway.ini
 
@@ -49,6 +52,11 @@ base_callsign() {
 configured() {
     [ -f "$CONFIG" ] && ! grep -q PLACEHOLDER "$CONFIG"
 }
+
+if [ ! -f "$CONFIG" ] && [ -f "$OLD_JSON" ]; then
+    mv "$OLD_JSON" "$OLD_JSON.rc1"
+    echo "qtcd: the config format is now INI; your old $OLD_JSON is saved as $OLD_JSON.rc1"
+fi
 
 if [ ! -f "$CONFIG" ]; then
     CALL="${QTCD_CALLSIGN:-}"
@@ -104,7 +112,7 @@ if [ ! -f "$CONFIG" ]; then
     chmod 640 "$CONFIG"
 
     if [ -n "$BASE" ]; then
-        echo "qtcd: node callsign '$NODE_CALL', upstream $REFLECTOR module $MODULE"
+        echo "qtcd: node callsign '$NODE_CALL'; voice on module A goes to $REFLECTOR module $MODULE"
     fi
     if [ ! -f "$HOSTS" ]; then
         echo "qtcd: warning: no M17Hosts.txt found; set inet.hosts_file in $CONFIG" >&2
@@ -128,9 +136,11 @@ if configured; then
     else
         echo "qtcd is configured; start it with: sudo systemctl enable --now qtcd"
     fi
-    echo "Point your gateway at reflector M17-QTC, module A, after adding this"
-    echo "line to its OverrideHosts.txt:"
-    echo "    M17-QTC 127.0.0.1 17000"
+    UP_REF="$(ini_value "Module A" Reflector "$CONFIG")"
+    UP_MOD="$(ini_value "Module A" Module "$CONFIG")"
+    echo "To use QTC, point your gateway at reflector M17-QTC, module A (with"
+    echo "'M17-QTC 127.0.0.1 17000' in its OverrideHosts.txt). Voice then still"
+    echo "goes to ${UP_REF:-the reflector in $CONFIG} module ${UP_MOD:-?}; SMS goes into QTC."
 else
     echo
     echo "qtcd is installed but not configured. Edit $CONFIG (replace each"

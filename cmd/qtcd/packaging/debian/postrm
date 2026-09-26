@@ -10,7 +10,7 @@ if [ -d /run/systemd/system ]; then
 fi
 
 if [ "$1" = "purge" ]; then
-    rm -f /etc/qtcd.json
+    rm -f /etc/qtcd.ini /etc/qtcd.json /etc/qtcd.json.rc1
     rm -rf /var/lib/qtcd
     if getent passwd qtcd >/dev/null; then
         userdel qtcd

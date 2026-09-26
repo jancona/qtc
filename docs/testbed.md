@@ -29,42 +29,71 @@ GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /tmp/qtcd-linux-a
 go build -o /tmp/qtc ./cmd/qtc
 ```
 
-A machine run by hand keeps `~/qtcd/` with `qtcd`, `qtcd.json`, the state files, and `qtcd.log`. Keep `node.key` so the peer ID stays the same; the test network's public station is `QmdxViFZP4PK5TL3xANxScyaFnvBfdqfbQqjjJGhvJvuSg`. Copying a binary over a running one fails with "text file busy": stop first.
+A machine run by hand keeps `~/qtcd/` with `qtcd`, `qtcd.ini`, the state files, and `qtcd.log`. Keep `node.key` so the peer ID stays the same; the test network's public station is `QmdxViFZP4PK5TL3xANxScyaFnvBfdqfbQqjjJGhvJvuSg`. Copying a binary over a running one fails with "text file busy": stop first.
 
 ## Configs
 
-Public station:
+Configs are INI; `cmd/qtcd/config.example.ini` describes every setting. Public station:
 
-```json
-{"callsign": "N1ADJ  P", "data_dir": "/home/pi/qtcd",
- "listen": ["/ip4/0.0.0.0/tcp/4001"], "bootstrap": [],
- "caps": ["public", "relay", "mailbox"], "dht": true,
- "metrics_interval": "60s", "admin": "127.0.0.1:8017"}
+```ini
+[General]
+Callsign=N1ADJ  P
+DataDir=/home/pi/qtcd
+Admin=127.0.0.1:8017
+MetricsInterval=60s
+
+[Network]
+Listen=/ip4/0.0.0.0/tcp/4001
+Caps=public,relay,mailbox
 ```
 
-A second public mailbox station bootstraps to the first: `"bootstrap": ["/ip4/<pi5-lan>/tcp/4001/p2p/<Pi 5 peer ID>"]`. On the laptop, bind `listen` to the LAN address with a distinct port and a distinct `admin` port.
+A second public mailbox station bootstraps to the first: `Bootstrap=/ip4/<pi5-lan>/tcp/4001/p2p/<Pi 5 peer ID>` in `[Network]`. On the laptop, bind `listen` to the LAN address with a distinct port and a distinct `admin` port.
 
 Home station with the client face (laptop), shortened periods for lifecycle tests:
 
-```json
-{"callsign": "N1ADJ  M", "data_dir": "<dir>", "listen": ["/ip4/<laptop-lan>/tcp/0"],
- "bootstrap": ["/ip4/<pi5-lan>/tcp/4001/p2p/<Pi 5 peer ID>"], "caps": [], "dht": true, "k": 2,
- "presence_interval": "60s", "sweep_interval": "60s", "record_refresh": "30s",
- "member_fail_sweeps": 3, "member_fail_silence": "2m", "takeover_period": "3m",
- "echo_room_messages": true, "metrics_interval": "60s", "admin": "127.0.0.1:8018",
- "inet": {"listen": "0.0.0.0:17000", "hosts_file": "<dir>/M17Hosts.txt",
-   "modules": {"A": {"reflector": "M17-M17", "module": "T", "mode": "qtc"},
-               "B": {"reflector": "M17-M17", "module": "T", "mode": "native"}}}}
+```ini
+[General]
+Callsign=N1ADJ  M
+DataDir=<dir>
+Admin=127.0.0.1:8018
+MetricsInterval=60s
+EchoRoomMessages=true
+
+[Network]
+Listen=/ip4/<laptop-lan>/tcp/0
+Bootstrap=/ip4/<pi5-lan>/tcp/4001/p2p/<Pi 5 peer ID>
+
+[Timers]
+PresenceInterval=60s
+SweepInterval=60s
+RecordRefresh=30s
+MemberFailSweeps=3
+MemberFailSilence=2m
+TakeoverPeriod=3m
+
+[Inet]
+Listen=0.0.0.0:17000
+HostsFile=<dir>/M17Hosts.txt
+
+[Module A]
+Reflector=M17-M17
+Module=T
+Mode=qtc
+
+[Module B]
+Reflector=M17-M17
+Module=T
+Mode=native
 ```
 
-`M17Hosts.txt` comes from a hotspot: `/opt/m17/rpi-dashboard/files/M17Hosts.txt`. Off the LAN, bootstrap with `/dns4/ham.n1adj.net/tcp/4001/p2p/<ID>`. `mailbox_members` is only a seed list now; leave it out when presence will show mailbox stations. Production values: presence 5 min, sweep 1 h, failure 24 h and 3 sweeps, takeover 7 days, echo off.
+`M17Hosts.txt` comes from a hotspot: `/opt/m17/rpi-dashboard/files/M17Hosts.txt`. Off the LAN, bootstrap with `/dns4/ham.n1adj.net/tcp/4001/p2p/<ID>`. `MailboxMembers` is only a seed list now; leave it out when presence will show mailbox stations. Production values: presence 5 min, sweep 1 h, failure 24 h and 3 sweeps, takeover 7 days, echo off.
 
 ## Bring-up
 
 Order: public stations first, then home stations, then the gateway.
 
 ```
-ssh <user>@<pi5-lan> 'cd ~/qtcd && pkill -x qtcd; sleep 1; (nohup ./qtcd -config qtcd.json -log-level debug > qtcd.log 2>&1 &)' < /dev/null
+ssh <user>@<pi5-lan> 'cd ~/qtcd && pkill -x qtcd; sleep 1; (nohup ./qtcd -config qtcd.ini -log-level debug > qtcd.log 2>&1 &)' < /dev/null
 ```
 
 Use `pkill -x qtcd`, never `pkill -f "qtcd -config"`: the pattern matches the SSH session's own command line and kills it. Redirect stdin from `/dev/null` on SSH commands that start background processes, or the session may not return.
@@ -101,5 +130,5 @@ Restore the gateway (`sudo cp /etc/m17-gateway.ini.pre-qtc /etc/m17-gateway.ini`
 - Radio UIs send `N1ADJ M`, one space; the node matches its callsign ignoring space runs.
 - Stopping a station without DISC left M17-M17 holding the old link and refusing the next CONN; fixed in code, but a killed station still leaves a stale link for the reflector's timeout.
 - A freshly started station has an empty presence table for up to one presence interval; records created in that window see fewer candidates.
-- With `data_dir` set, mailboxes and the delivered-once table are journaled there (`mailbox.jsonl`, `delivered.jsonl`) and survive a restart. Without it they are in memory: a restart empties them and the replay window can redeliver. `data_dir` also defaults the key to `<data_dir>/node.key`, so pointing it at `~/qtcd` keeps the existing peer ID.
+- With `DataDir` set, mailboxes and the delivered-once table are journaled there (`mailbox.jsonl`, `delivered.jsonl`) and survive a restart. Without it they are in memory: a restart empties them and the replay window can redeliver. `DataDir` also defaults the key to `<DataDir>/node.key`, so pointing it at `~/qtcd` keeps the existing peer ID.
 - A temporary directory holding test keys and configs may not outlive the session; keep test configs somewhere durable.
