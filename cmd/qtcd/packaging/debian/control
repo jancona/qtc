@@ -1,0 +1,16 @@
+Package: qtcd
+Version: VERSION_PLACEHOLDER
+Section: net
+Priority: optional
+Architecture: ARCH_PLACEHOLDER
+Depends: systemd
+Suggests: m17-gateway
+Maintainer: Jim Ancona, N1ADJ <jim@anconafamily.com>
+Homepage: https://github.com/jancona/qtc
+Description: QTC store-and-forward messaging node for M17
+ qtcd joins the QTC network and presents itself to an M17 gateway as a
+ reflector (M17-QTC), taking SMS on its QTC module into store-and-forward
+ messaging by callsign and by room. Voice passes through to the upstream
+ reflector unchanged. Includes the qtc command-line tool.
+ .
+ Experimental: messages are not private, and callsigns are not verified.

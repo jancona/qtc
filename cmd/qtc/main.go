@@ -8,6 +8,7 @@
 //	qtc fixtures [file]
 //	qtc store put|query|watch -peer <multiaddr> ...
 //	qtc send -from CALL -to CALL|#ROOM -body TEXT [-rcpt] [-ttl MIN] [-admin host:port] [-json]
+//	qtc version
 package main
 
 import (
@@ -24,6 +25,15 @@ var commands = map[string]struct {
 	"fixtures": {runFixtures, "check docs/qtc-fixtures.json (or the given file) against the envelope package"},
 	"store":    {runStore, "put, query, or watch a mailbox node over libp2p"},
 	"send":     {runSend, "build a MSG and print it or hand it to a running station's admin interface"},
+	"version":  {runVersion, "print the version"},
+}
+
+// version is set at build time with -ldflags "-X main.version=...".
+var version = "dev"
+
+func runVersion([]string) error {
+	fmt.Println(version)
+	return nil
 }
 
 func main() {
@@ -45,7 +55,7 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage: qtc <command> [flags]\n\ncommands:")
-	for _, name := range []string{"decode", "keys", "fixtures", "store", "send"} {
+	for _, name := range []string{"decode", "keys", "fixtures", "store", "send", "version"} {
 		fmt.Fprintf(os.Stderr, "  %-9s %s\n", name, commands[name].help)
 	}
 }

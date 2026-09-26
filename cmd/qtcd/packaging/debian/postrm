@@ -1,0 +1,22 @@
+#!/bin/bash
+#
+# postrm for qtcd. Remove keeps the config and state (node key, mailboxes);
+# purge deletes them and the service user.
+
+set -e
+
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload || true
+fi
+
+if [ "$1" = "purge" ]; then
+    rm -f /etc/qtcd.json
+    rm -rf /var/lib/qtcd
+    if getent passwd qtcd >/dev/null; then
+        userdel qtcd
+    fi
+    if getent group qtcd >/dev/null; then
+        groupdel qtcd
+    fi
+    echo "qtcd: configuration, node key, and stored messages removed."
+fi

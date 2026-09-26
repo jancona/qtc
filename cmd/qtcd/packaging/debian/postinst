@@ -1,0 +1,139 @@
+#!/bin/bash
+#
+# postinst for qtcd.
+#
+# A new install writes /etc/qtcd.json from the sample:
+#   - callsign: QTCD_CALLSIGN if set (the hotspot installer passes it), else
+#     the gateway's callsign from /etc/m17-gateway.ini, else a prompt on an
+#     interactive terminal. The node uses the base callsign with module Q.
+#   - upstream: the gateway's current reflector and module, so voice keeps
+#     going where it went before the gateway is pointed at M17-QTC.
+# An existing /etc/qtcd.json is never touched.
+
+set -e
+
+CONFIG=/etc/qtcd.json
+SAMPLE=/usr/share/qtcd/qtcd.json.sample
+STATE=/var/lib/qtcd
+GATEWAY_INI=/etc/m17-gateway.ini
+
+[ "$1" = "configure" ] || exit 0
+
+if ! getent group qtcd >/dev/null; then
+    groupadd --system qtcd
+fi
+if ! getent passwd qtcd >/dev/null; then
+    useradd --system --gid qtcd --home-dir "$STATE" --no-create-home --shell /usr/sbin/nologin qtcd
+fi
+install -d -o qtcd -g qtcd -m 0700 "$STATE"
+
+# ini_value SECTION KEY FILE prints KEY from [SECTION], tolerating spaces
+# around '='.
+ini_value() {
+    awk -v want_s="[$1]" -v want_k="$2" '
+        { line = $0; gsub(/^[ \t]+|[ \t\r]+$/, "", line) }
+        line ~ /^\[/ { in_s = (line == want_s); next }
+        in_s && index(line, "=") {
+            k = line; sub(/[ \t]*=.*/, "", k)
+            if (k == want_k) { v = line; sub(/^[^=]*=[ \t]*/, "", v); print v; exit }
+        }
+    ' "$3"
+}
+
+# base_callsign TEXT prints the upper-case base callsign: everything before
+# the first space or '-'.
+base_callsign() {
+    echo "$1" | tr '[:lower:]' '[:upper:]' | sed -E 's/^[[:space:]]+//; s/[[:space:]-].*$//'
+}
+
+configured() {
+    [ -f "$CONFIG" ] && ! grep -q PLACEHOLDER "$CONFIG"
+}
+
+if [ ! -f "$CONFIG" ]; then
+    CALL="${QTCD_CALLSIGN:-}"
+    REFLECTOR=""
+    MODULE=""
+    if [ -f "$GATEWAY_INI" ]; then
+        [ -n "$CALL" ] || CALL="$(ini_value General Callsign "$GATEWAY_INI")"
+        REFLECTOR="$(ini_value Reflector Name "$GATEWAY_INI")"
+        MODULE="$(ini_value Reflector Module "$GATEWAY_INI")"
+    fi
+    [ "$CALL" = "CALLSIGN_PLACEHOLDER" ] && CALL=""
+    if [ -z "$CALL" ] && [ -t 0 ]; then
+        echo
+        echo "QTC node configuration"
+        echo "======================"
+        echo "Enter your amateur radio callsign (e.g. N1ADJ):"
+        echo "(Leave blank to edit $CONFIG yourself later)"
+        read -r CALL
+    fi
+    BASE="$(base_callsign "$CALL")"
+    if [ -n "$BASE" ] && ! echo "$BASE" | grep -Eq '^[A-Z0-9/]{3,8}$'; then
+        echo "qtcd: '$CALL' does not look like a callsign; edit $CONFIG yourself." >&2
+        BASE=""
+    fi
+
+    # Never proxy to ourselves: a gateway already pointed at M17-QTC says
+    # nothing about the real upstream.
+    if [ -z "$REFLECTOR" ] || [ "$REFLECTOR" = "M17-QTC" ]; then
+        REFLECTOR="M17-M17"
+        MODULE="C"
+    fi
+    MODULE="$(echo "${MODULE:-C}" | cut -c1 | tr '[:lower:]' '[:upper:]')"
+
+    HOSTS=/opt/m17/rpi-dashboard/files/M17Hosts.txt
+    for h in /opt/m17/rpi-dashboard/files/M17Hosts.txt /opt/m17/m17-gateway/M17Hosts.txt; do
+        if [ -f "$h" ]; then
+            HOSTS="$h"
+            break
+        fi
+    done
+
+    NODE_CALL=CALLSIGN_PLACEHOLDER
+    if [ -n "$BASE" ]; then
+        # M17 form: callsign padded to eight characters, module letter ninth.
+        NODE_CALL="$(printf '%-8sQ' "$BASE")"
+    fi
+    sed -e "s|CALLSIGN_PLACEHOLDER|$NODE_CALL|" \
+        -e "s|HOSTS_FILE_PLACEHOLDER|$HOSTS|" \
+        -e "s|REFLECTOR_PLACEHOLDER|$REFLECTOR|" \
+        -e "s|MODULE_PLACEHOLDER|$MODULE|" \
+        "$SAMPLE" > "$CONFIG"
+    chown root:qtcd "$CONFIG"
+    chmod 640 "$CONFIG"
+
+    if [ -n "$BASE" ]; then
+        echo "qtcd: node callsign '$NODE_CALL', upstream $REFLECTOR module $MODULE"
+    fi
+    if [ ! -f "$HOSTS" ]; then
+        echo "qtcd: warning: no M17Hosts.txt found; set inet.hosts_file in $CONFIG" >&2
+    fi
+fi
+
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload
+fi
+
+if configured; then
+    # Creates the node key as the service user, and shows the peer ID.
+    if PEER_ID="$(runuser -u qtcd -- /usr/bin/qtcd -config "$CONFIG" -print-id 2>/dev/null)"; then
+        echo "qtcd: peer ID $PEER_ID"
+    fi
+    echo
+    if [ -d /run/systemd/system ]; then
+        systemctl enable qtcd.service
+        systemctl restart qtcd.service
+        echo "qtcd is running."
+    else
+        echo "qtcd is configured; start it with: sudo systemctl enable --now qtcd"
+    fi
+    echo "Point your gateway at reflector M17-QTC, module A, after adding this"
+    echo "line to its OverrideHosts.txt:"
+    echo "    M17-QTC 127.0.0.1 17000"
+else
+    echo
+    echo "qtcd is installed but not configured. Edit $CONFIG (replace each"
+    echo "PLACEHOLDER), then run: sudo systemctl enable --now qtcd"
+fi
+echo "Logs: journalctl -u qtcd -f    Status: curl -s localhost:8017/status"

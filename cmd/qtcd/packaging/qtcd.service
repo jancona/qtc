@@ -1,0 +1,36 @@
+[Unit]
+Description=QTC messaging node
+Documentation=https://github.com/jancona/qtc
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=qtcd
+Group=qtcd
+ExecStart=/usr/bin/qtcd -config /etc/qtcd.json
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# State (node key, mailbox and delivered journals) lives only here.
+StateDirectory=qtcd
+StateDirectoryMode=0700
+
+# Hardening: qtcd needs the network and its state directory, nothing else.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

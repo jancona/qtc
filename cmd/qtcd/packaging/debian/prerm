@@ -1,0 +1,18 @@
+#!/bin/bash
+#
+# prerm for qtcd: stop the service before its files change. On upgrade,
+# postinst starts it again; on removal it is also disabled.
+
+set -e
+
+[ -d /run/systemd/system ] || exit 0
+
+case "$1" in
+    remove)
+        systemctl stop qtcd.service || true
+        systemctl disable qtcd.service || true
+        ;;
+    upgrade)
+        systemctl stop qtcd.service || true
+        ;;
+esac

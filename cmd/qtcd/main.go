@@ -1,6 +1,6 @@
 // Command qtcd runs a QTC node.
 //
-// Usage: qtcd -config qtcd.json [-log-level debug|info|warn]
+// Usage: qtcd -config qtcd.json [-log-level debug|info|warn] [-print-id] [-version]
 //
 // The config file is JSON; see config.example.json alongside this source.
 package main
@@ -20,6 +20,9 @@ import (
 
 	"github.com/jancona/qtc/qtcd"
 )
+
+// version is set at build time with -ldflags "-X main.version=...".
+var version = "dev"
 
 // fileConfig is the on-disk shape of qtcd.Config.
 type fileConfig struct {
@@ -62,8 +65,13 @@ func main() {
 		path     = flag.String("config", "qtcd.json", "config file")
 		logLevel = flag.String("log-level", "info", "debug, info, warn, or error")
 		printID  = flag.Bool("print-id", false, "load or create the node key, print the peer ID, and exit")
+		showVer  = flag.Bool("version", false, "print the version and exit")
 	)
 	flag.Parse()
+	if *showVer {
+		fmt.Println(version)
+		return
+	}
 
 	var level slog.Level
 	if err := level.UnmarshalText([]byte(*logLevel)); err != nil {
@@ -170,6 +178,9 @@ func loadConfig(path string) (qtcd.Config, error) {
 			return cfg, fmt.Errorf("bad duration %q: %w", d.s, err)
 		}
 		*d.dst = v
+	}
+	if cfg.Software == "" {
+		cfg.Software = "qtcd/" + version
 	}
 	if len(cfg.ListenAddrs) == 0 {
 		cfg.ListenAddrs = []string{"/ip4/0.0.0.0/tcp/0"}

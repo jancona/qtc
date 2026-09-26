@@ -31,8 +31,12 @@ envelope/   MSG/RCPT/ROOM parsing, IDs, signatures, addresses and room name enco
 store/      JSON Lines put/query/watch protocol, client and server. stdlib + envelope.
 qtcd/       the daemon as a library, one flat package: subscriptions, M17_inet proxy side, libp2p side, homing, sweeps, home station.
 cmd/qtcd/   daemon binary: config, flags, signals, wiring.   cmd/qtc/  CLI (decode, keys, fixtures, store client).
+cmd/qtcd/packaging/  .deb for qtcd + qtc (systemd unit, maintainer scripts, sample config); scripts/build-deb.sh VERSION ARCH. CI (.github/workflows/qtc.yml) releases it on v* tags.
+app/        GUI client (Fyne, desktop and Android). Its own Go module, listed in go.work.
 docs/       specs and fixtures.
 ```
+
+`app/` is a separate module so Fyne never enters the daemon's or CLI's dependency graph. It may import `envelope`, `store` and `github.com/jancona/m17`; nothing in the main module imports it. Release builds run with `GOWORK=off` against the tagged `m17` in `go.mod`, so any `m17` change a release needs must be tagged first.
 
 Imports go one way: `envelope` → `store` → `station` → `cmd`. Few packages on purpose: a new package needs a consumer that must not import what it would otherwise pull in (the CLI must not link libp2p, which is why `store` is separate). Split by file, not by package, until then. Anything that wants to import the other way is a design problem, not a packaging one.
 
@@ -40,7 +44,7 @@ Depends on `github.com/jancona/m17`, checked out alongside and resolved via `go.
 
 ## Conventions
 
-- Go 1.22+. `gofmt`, `go vet`, `staticcheck` clean. Table-driven tests; every encoder has a fixtures test.
+- Go 1.26 (per `go.mod`). `gofmt`, `go vet`, `staticcheck` clean. Table-driven tests; every encoder has a fixtures test.
 - Wrap errors with context; no panics outside `main`. Log with `log/slog`.
 - Wire formats are big-endian. Timestamps are `uint32` Unix seconds; `0` means unknown.
 - No hand-implemented cryptographic primitives. Use `crypto/*` from the standard library; if it cannot do what a spec asks, stop and ask rather than writing it. Interop tests verify signatures; they never compare signature bytes.
@@ -49,9 +53,11 @@ Depends on `github.com/jancona/m17`, checked out alongside and resolved via `go.
 
 ## Current milestone
 
-Spike: two stations behind NAT on separate home networks plus one public station on a VPS. Presence over gossipsub, one room topic, one mailbox with put/query/watch. Success: runs alongside a normal hotspot install (gateway + dashboard already at load ~1.2, ~200 MB) on a Pi Zero 2 W without visibly degrading it; RSS and idle CPU recorded in `docs/spike-results.md`.
+Milestones 1–4 are done (`docs/qtc-architecture.md` §9, results in `docs/spike-results.md`). Now: milestone 5, an invite-only test with known hotspot operators and internet-only users. Exit criteria are in §9.
 
-Order: `envelope` against fixtures → `store` → `station` skeleton (subscriptions first) → spike.
+Order: persistence (JSONL journal around `MemStore`, delivered-once table) and the `inet.allow_callsigns` allowlist → `.deb`, systemd, CI releases, hotspot-installer fork → `qtc chat` and the `app/` GUI (desktop and Android) → operator and user guides → onboarding with ham.n1adj.net as the public station. Quotas and user keys stay deferred; don't pull them in.
+
+Every change must still run alongside a normal hotspot install on a Pi Zero 2 W without visibly degrading it.
 
 ## Open questions (do not silently resolve)
 
