@@ -165,9 +165,10 @@ type Station struct {
 	delivered map[deliveryKey]struct{}
 	queued    map[envelope.ID]struct{} // QUEUED already issued
 
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	ctx     context.Context
+	cancel  context.CancelFunc
+	started time.Time // when Start ran; bounds what this node can know about others' silence
+	wg      sync.WaitGroup
 }
 
 type deliveryKey struct {
@@ -224,6 +225,7 @@ func New(cfg Config) (*Station, error) {
 // has CapMailbox, presence, and the configured local devices.
 func (r *Station) Start(ctx context.Context) error {
 	r.ctx, r.cancel = context.WithCancel(ctx)
+	r.started = time.Now()
 	if err := r.startP2P(); err != nil {
 		r.cancel()
 		return err

@@ -249,15 +249,17 @@ func (rs *recordStore) resolve(ctx context.Context, base envelope.Address, homed
 	return rec, nil
 }
 
-// silentFor is how long since presence last saw a node; a very long time
-// if never.
+// silentFor is how long since presence last saw a node. A node this
+// station has never seen counts as silent only since this station started
+// listening: a fresh station knows nothing about earlier silence and must
+// not take over or repair on that basis.
 func (rs *recordStore) silentFor(id peer.ID) time.Duration {
 	if id == rs.r.host.ID() {
 		return 0
 	}
 	n, ok := rs.r.presence.Node(id)
 	if !ok || n.LastSeen == 0 {
-		return 100 * 365 * 24 * time.Hour
+		return time.Since(rs.r.started)
 	}
 	return time.Since(time.Unix(int64(n.LastSeen), 0))
 }

@@ -168,7 +168,7 @@ A home station may replace a member for reasons other than failure (moving to a 
 
 ### 8.4 Takeover
 
-If the home station's node has been silent in presence for the takeover period, any station currently homing the callsign may write a record naming itself home station. Concurrent takeovers resolve by version and the DHT's ordering; the losing node re-reads and defers. Takeover is expected to be rare and is logged with the old and new node IDs.
+If the home station's node has been silent in presence for the takeover period, any station currently homing the callsign may write a record naming itself home station. A station that has never seen the home station in presence counts its silence from its own start, since it knows nothing earlier; the same bound applies to member failure (§8.2). Concurrent takeovers resolve by version and the DHT's ordering; the losing node re-reads and defers. Takeover is expected to be rare and is logged with the old and new node IDs.
 
 ## 9. Rooms Transport
 
