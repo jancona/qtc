@@ -80,11 +80,18 @@ The node protocol runs on go-libp2p: TLS transport, peer identity from the node 
 
 ## 9. Milestones
 
-1. **Spike.** Two stations on separate home networks behind NAT, one public station on a VPS. Presence over gossipsub, one room topic, one mailbox with put/query. Measure binary size and memory on a Pi Zero 2. Decide whether libp2p earns its weight.
-2. **Proxy reflector.** A station in front of an unmodified WPSD hotspot, generated hosts file, voice unaffected.
-3. **Legacy messaging end to end.** SMS from an OpenRTX radio through a hotspot station to a GUI client and back.
-4. **Native envelope.** OpenRTX speaks MSG/RCPT; receipts and dedup work.
-5. **Home station and repair.** Mailbox record lifecycle, first-time recipient, node failure and recovery.
+Done, with results in `spike-results.md`:
+
+1. **Spike.** Two stations behind NAT and one public station. Presence over gossipsub, one room topic, one mailbox with put/query/watch. libp2p earns its weight: 28 MB RSS and no measurable CPU on a Pi Zero 2 W.
+2. **Proxy reflector.** A station presenting itself as a reflector (`M17-QTC`) to an unmodified gateway, with per-module native and QTC modes; voice unaffected.
+3. **Legacy messaging end to end.** SMS from an OpenRTX radio through a hotspot station and back, room commands and room messages by SMS convention.
+4. **Home station and repair.** Mailbox record lifecycle: creation, sender lookup, provisional handoff, repair, takeover, top-up.
+
+Later, demand-driven rather than sequenced:
+
+- **Native envelope in a radio.** OpenRTX speaks MSG/RCPT so receipts and dedup work on the radio itself. OpenRTX has no released SMS client yet, so this waits for adoption to create the demand; the envelope and client face are ready for it.
+- **Native m17-gateway.** The gateway speaks the QTC node protocol directly, removing the proxy for that hotspot.
+- **Record migration** (Node Protocol §8.3) and **quotas** (§12).
 
 ## 10. Open Questions
 
