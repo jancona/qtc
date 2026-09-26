@@ -78,10 +78,21 @@ func (a *Admin) status(w http.ResponseWriter, req *http.Request) {
 		nodes = append(nodes, no)
 	}
 	var homed []string
+	records := map[string]any{}
 	for _, a := range r.Homed() {
 		rooms, _ := r.subs.Rooms(a)
 		homed = append(homed, fmt.Sprintf("%s rooms=%v", a, rooms))
 	}
+	r.records.mu.Lock()
+	for base, rec := range r.records.cache {
+		members := make([]string, 0, len(rec.Members))
+		for _, m := range rec.Members {
+			members = append(members, m.String())
+		}
+		records[base.String()] = map[string]any{"version": rec.Version, "home_station": rec.HomeStation.String(),
+			"members": members, "provisional": rec.Provisional(), "updated": rec.Updated}
+	}
+	r.records.mu.Unlock()
 	var peers []string
 	for _, p := range r.host.Network().Peers() {
 		var addrs []string
@@ -96,6 +107,7 @@ func (a *Admin) status(w http.ResponseWriter, req *http.Request) {
 		"addrs":    addrStrings(r),
 		"peers":    peers,
 		"homed":    homed,
+		"records":  records,
 		"rooms":    r.subs.ActiveRooms(),
 		"presence": nodes,
 	}

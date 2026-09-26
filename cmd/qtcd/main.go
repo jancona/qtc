@@ -47,8 +47,12 @@ type fileConfig struct {
 			Mode      string `json:"mode"`      // "native" or "qtc"
 		} `json:"modules"`
 	} `json:"inet"`
-	PresenceInterval string `json:"presence_interval"`
-	SweepInterval    string `json:"sweep_interval"`
+	PresenceInterval  string `json:"presence_interval"`
+	SweepInterval     string `json:"sweep_interval"`
+	RecordRefresh     string `json:"record_refresh"`
+	TakeoverPeriod    string `json:"takeover_period"`
+	MemberFailSilence string `json:"member_fail_silence"`
+	MemberFailSweeps  int    `json:"member_fail_sweeps"`
 }
 
 func main() {
@@ -132,6 +136,7 @@ func loadConfig(path string) (qtcd.Config, error) {
 		EnableDHT:        fc.DHT,
 		MailboxMembers:   fc.MailboxMembers,
 		K:                uint8(fc.K),
+		MemberFailSweeps: fc.MemberFailSweeps,
 		Rooms:            fc.Rooms,
 		Devices:          fc.Devices,
 		EchoRoomMessages: fc.EchoRoomMessages,
@@ -153,7 +158,7 @@ func loadConfig(path string) (qtcd.Config, error) {
 	for _, d := range []struct {
 		s   string
 		dst *time.Duration
-	}{{fc.MetricsInterval, &cfg.MetricsInterval}, {fc.PresenceInterval, &cfg.PresenceInterval}, {fc.SweepInterval, &cfg.SweepInterval}} {
+	}{{fc.MetricsInterval, &cfg.MetricsInterval}, {fc.PresenceInterval, &cfg.PresenceInterval}, {fc.SweepInterval, &cfg.SweepInterval}, {fc.RecordRefresh, &cfg.RecordRefresh}, {fc.TakeoverPeriod, &cfg.TakeoverPeriod}, {fc.MemberFailSilence, &cfg.MemberFailSilence}} {
 		if d.s == "" {
 			continue
 		}
