@@ -52,6 +52,12 @@ type InetConfig struct {
 	Gateways []*net.IPNet
 	// SessionTimeout drops a client silent for this long; 0 means 60 s.
 	SessionTimeout time.Duration
+	// AllowCallsigns, when non-empty, limits internet clients (those outside
+	// Gateways) to these base callsigns: a CONN from any other is NACKed,
+	// and on a qtc module a packet or stream whose source is any other is
+	// ignored. Gateways are not limited. This keeps strangers off an open
+	// face; it does not verify that a client is who it claims to be.
+	AllowCallsigns []string
 }
 
 // inetCore is what the client face needs from the station, kept small so the
@@ -84,7 +90,8 @@ type inetFace struct {
 	cfg      InetConfig
 	log      *slog.Logger
 	conn     *net.UDPConn
-	upstream map[byte]*net.UDPAddr // resolved per module
+	upstream map[byte]*net.UDPAddr     // resolved per module
+	allow    map[envelope.Address]bool // base callsigns; nil allows all
 
 	mu       sync.Mutex
 	sessions map[string]*inetSession           // by client address
@@ -151,6 +158,16 @@ func newInetFace(core inetCore, cfg InetConfig) (*inetFace, error) {
 		upstream: map[byte]*net.UDPAddr{},
 		sessions: map[string]*inetSession{},
 		devices:  map[envelope.Address]*inetSession{},
+	}
+	for _, c := range cfg.AllowCallsigns {
+		a, err := envelope.EncodeAddress(strings.TrimSpace(c))
+		if err != nil || !a.IsStandard() {
+			return nil, fmt.Errorf("qtcd: inet: allowed callsign %q: %w", c, errors.Join(err, ErrNotCallsign))
+		}
+		if f.allow == nil {
+			f.allow = map[envelope.Address]bool{}
+		}
+		f.allow[a.Base()] = true
 	}
 	for letter, m := range cfg.Modules {
 		if letter < 'A' || letter > 'Z' {
@@ -262,6 +279,12 @@ func (f *inetFace) via(ip net.IP) Via {
 	return ViaInternet
 }
 
+// allowed reports whether a callsign heard over a link with the given via
+// passes AllowCallsigns.
+func (f *inetFace) allowed(a envelope.Address, via Via) bool {
+	return f.allow == nil || via != ViaInternet || f.allow[a.Base()]
+}
+
 func (f *inetFace) send(to *net.UDPAddr, b []byte) {
 	if _, err := f.conn.WriteToUDP(b, to); err != nil {
 		f.log.Debug("inet write", "to", to, "err", err)
@@ -319,6 +342,11 @@ func (f *inetFace) connect(b []byte, addr *net.UDPAddr) {
 		return
 	}
 	module := b[10]
+	if call := envelope.AddressFromBytes(b[4:10]); !f.allowed(call, f.via(addr.IP)) {
+		f.log.Info("NACK: callsign not allowed", "client", addr, "callsign", call)
+		f.send(addr, controlDatagram(magicNACK, f.core.inetCallsign()))
+		return
+	}
 	mod, ok := f.cfg.Modules[module]
 	if !ok {
 		f.log.Info("NACK: unmapped module", "client", addr, "module", string(module))
@@ -457,7 +485,7 @@ func (s *inetSession) close(disc bool) {
 // once per heardRateLimit per device, and remembers the session for
 // delivery.
 func (s *inetSession) heard(device envelope.Address) {
-	if !device.IsStandard() {
+	if !device.IsStandard() || !s.face.allowed(device, s.via) {
 		return
 	}
 	now := time.Now()
@@ -485,6 +513,10 @@ func (s *inetSession) clientPacket(b []byte) {
 		return
 	}
 	if s.qtcMode {
+		if !s.face.allowed(pf.src, s.via) {
+			s.face.log.Info("packet from callsign not allowed; dropped", "client", s.client, "src", pf.src)
+			return
+		}
 		s.heard(pf.src)
 	}
 	switch pf.typ {

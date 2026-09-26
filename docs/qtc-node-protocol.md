@@ -148,7 +148,7 @@ A station that creates a record for a callsign it has never heard (because a loc
 
 ### 7.4 Delivery
 
-On EVENT, or on a message found by a sweep, a station delivers once per local device that the destination addresses (all devices if the destination has no suffix; only the matching device if it has one), issuing TRANSMITTED with that device's `last` heard time if RCPT_REQ was set. It never delivers the same message ID to the same device twice.
+On EVENT, or on a message found by a sweep, a station delivers once per local device that the destination addresses (all devices if the destination has no suffix; only the matching device if it has one), issuing TRANSMITTED with that device's `last` heard time if RCPT_REQ was set. It never delivers the same message ID to the same device twice. It remembers each delivery for the delivered-once retention (§11), across restarts: a mailbox can offer a message again at any time while it holds it (a repair copies history to a recruit, whose EVENT reaches every watcher), so the retention outlasts the longest TTL an envelope can carry.
 
 ## 8. Home stations and Repair
 
@@ -216,6 +216,7 @@ A consequence to be aware of: a user on a qtc-mode module can exchange messages 
 | Migration rate | 1 per day |
 | Max store message | 1 MiB |
 | Message retention | envelope TTL (default 7 days) |
+| Delivered-once retention | longest envelope TTL (0xFFFF minutes, about 45.5 days) plus 1 h future-timestamp tolerance |
 
 ## 12. Open Questions
 

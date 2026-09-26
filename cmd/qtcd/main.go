@@ -24,7 +24,8 @@ import (
 // fileConfig is the on-disk shape of qtcd.Config.
 type fileConfig struct {
 	Callsign         string   `json:"callsign"`
-	KeyFile          string   `json:"key_file"`
+	KeyFile          string   `json:"key_file"` // default <data_dir>/node.key
+	DataDir          string   `json:"data_dir"` // persistent state; "" keeps mailboxes in memory
 	Listen           []string `json:"listen"`
 	Bootstrap        []string `json:"bootstrap"`
 	Caps             []string `json:"caps"` // public, relay, mailbox, clients
@@ -38,9 +39,10 @@ type fileConfig struct {
 	EchoRoomMessages bool     `json:"echo_room_messages"` // deliver a room message back to its sender\'s device (testing)
 	Admin            string   `json:"admin"`              // loopback host:port for the admin HTTP interface; "" disables
 	Inet             *struct {
-		Listen    string   `json:"listen"`     // UDP address the reflector face listens on, e.g. "0.0.0.0:17000"
-		HostsFile string   `json:"hosts_file"` // M17Hosts.txt for resolving reflector names
-		Gateways  []string `json:"gateways"`   // CIDRs whose clients are RF gateways; default private ranges
+		Listen    string   `json:"listen"`          // UDP address the reflector face listens on, e.g. "0.0.0.0:17000"
+		HostsFile string   `json:"hosts_file"`      // M17Hosts.txt for resolving reflector names
+		Gateways  []string `json:"gateways"`        // CIDRs whose clients are RF gateways; default private ranges
+		Allow     []string `json:"allow_callsigns"` // base callsigns internet clients may use; empty allows all
 		Modules   map[string]struct {
 			Reflector string `json:"reflector"` // upstream name from hosts_file, or host:port
 			Module    string `json:"module"`    // upstream module letter
@@ -130,6 +132,7 @@ func loadConfig(path string) (qtcd.Config, error) {
 	cfg := qtcd.Config{
 		Callsign:         fc.Callsign,
 		KeyFile:          fc.KeyFile,
+		DataDir:          fc.DataDir,
 		ListenAddrs:      fc.Listen,
 		Bootstrap:        fc.Bootstrap,
 		Software:         fc.Software,
@@ -172,7 +175,7 @@ func loadConfig(path string) (qtcd.Config, error) {
 		cfg.ListenAddrs = []string{"/ip4/0.0.0.0/tcp/0"}
 	}
 	if fc.Inet != nil {
-		ic := &qtcd.InetConfig{Listen: fc.Inet.Listen, HostsFile: fc.Inet.HostsFile, Modules: map[byte]qtcd.ModuleConfig{}}
+		ic := &qtcd.InetConfig{Listen: fc.Inet.Listen, HostsFile: fc.Inet.HostsFile, AllowCallsigns: fc.Inet.Allow, Modules: map[byte]qtcd.ModuleConfig{}}
 		if ic.Listen == "" {
 			ic.Listen = "0.0.0.0:17000"
 		}

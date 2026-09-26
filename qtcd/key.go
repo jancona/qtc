@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -36,6 +37,9 @@ func loadOrCreateKey(path string) (*ecdsa.PrivateKey, error) {
 			return nil, fmt.Errorf("qtcd: encode key: %w", err)
 		}
 		pemBytes := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			return nil, fmt.Errorf("qtcd: key dir: %w", err)
+		}
 		if err := os.WriteFile(path, pemBytes, 0o600); err != nil {
 			return nil, fmt.Errorf("qtcd: write key %s: %w", path, err)
 		}

@@ -1,6 +1,6 @@
 {
   "callsign": "N1ADJ  H",
-  "key_file": "/var/lib/qtcd/node.key",
+  "data_dir": "/var/lib/qtcd",
   "listen": ["/ip4/0.0.0.0/tcp/0"],
   "bootstrap": ["/ip4/203.0.113.10/tcp/4001/p2p/<public station peer ID>"],
   "caps": [],
@@ -16,6 +16,7 @@
   "inet": {
     "listen": "0.0.0.0:17000",
     "hosts_file": "/opt/m17/m17-gateway/M17Hosts.txt",
+    "allow_callsigns": [],
     "modules": {
       "A": {"reflector": "M17-M17", "module": "C", "mode": "qtc"},
       "B": {"reflector": "M17-M17", "module": "C", "mode": "native"}

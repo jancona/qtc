@@ -84,9 +84,10 @@ func ctx(t *testing.T) context.Context {
 	return c
 }
 
-func TestPutQueryDedup(t *testing.T) {
+func TestPutQueryDedup(t *testing.T) { eachStore(t, 0, testPutQueryDedup) }
+
+func testPutQueryDedup(t *testing.T, mem testStore) {
 	clk := &clock{t0}
-	mem := NewMemStore()
 	srv := NewServer(mem)
 	srv.Now = clk.Now
 	cl, stop := pair(t, srv)
@@ -139,10 +140,10 @@ func TestPutQueryDedup(t *testing.T) {
 	}
 }
 
-func TestPutErrors(t *testing.T) {
+func TestPutErrors(t *testing.T) { eachStore(t, 1, testPutErrors) }
+
+func testPutErrors(t *testing.T, mem testStore) {
 	clk := &clock{t0}
-	mem := NewMemStore()
-	mem.MaxPerCallsign = 1
 	srv := NewServer(mem)
 	srv.Now = clk.Now
 	cl, stop := pair(t, srv)
@@ -212,9 +213,10 @@ func TestPutErrors(t *testing.T) {
 	cc.Close()
 }
 
-func TestQueryPagingAndTypes(t *testing.T) {
+func TestQueryPagingAndTypes(t *testing.T) { eachStore(t, 0, testQueryPagingAndTypes) }
+
+func testQueryPagingAndTypes(t *testing.T, mem testStore) {
 	clk := &clock{t0}
-	mem := NewMemStore()
 	srv := NewServer(mem)
 	srv.Now = clk.Now
 	cl, stop := pair(t, srv)
@@ -431,8 +433,9 @@ func TestPolicyExpiry(t *testing.T) {
 	}
 }
 
-func TestMemStoreExpire(t *testing.T) {
-	mem := NewMemStore()
+func TestStoreExpire(t *testing.T) { eachStore(t, 0, testStoreExpire) }
+
+func testStoreExpire(t *testing.T, mem testStore) {
 	put := func(e *envelope.Envelope, recv, exp uint32) {
 		if _, err := mem.Put(Record{Callsign: w1aw, Env: e, ReceivedAt: recv, Expiry: exp}); err != nil {
 			t.Fatal(err)

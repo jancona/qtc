@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/jancona/qtc/envelope"
@@ -94,7 +95,15 @@ func (r *Station) startP2P() error {
 	r.ps = ps
 
 	if r.cfg.Caps.Has(CapMailbox) {
-		r.mem = store.NewMemStore()
+		if r.cfg.DataDir != "" {
+			fs, err := store.OpenFileStore(filepath.Join(r.cfg.DataDir, "mailbox.jsonl"), store.NewMemStore(), unixNow(), r.log)
+			if err != nil {
+				return fmt.Errorf("qtcd: mailbox: %w", err)
+			}
+			r.mem = fs
+		} else {
+			r.mem = store.NewMemStore()
+		}
 		r.server = store.NewServer(r.mem)
 		r.server.Policy = store.Policy{DefaultTTL: r.cfg.DefaultTTL}
 		r.server.Log = r.log

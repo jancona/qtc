@@ -34,7 +34,7 @@ Each machine keeps `~/qtcd/` with `qtcd`, `qtcd.json`, `node.key`, and `qtcd.log
 Public station (Pi 5):
 
 ```json
-{"callsign": "N1ADJ  P", "key_file": "/home/pi/qtcd/node.key",
+{"callsign": "N1ADJ  P", "data_dir": "/home/pi/qtcd",
  "listen": ["/ip4/0.0.0.0/tcp/4001"], "bootstrap": [],
  "caps": ["public", "relay", "mailbox"], "software": "qtcd/0.1", "dht": true,
  "metrics_interval": "60s", "admin": "127.0.0.1:8017"}
@@ -45,7 +45,7 @@ A second public mailbox station bootstraps to the first: `"bootstrap": ["/ip4/19
 Home station with the client face (laptop), shortened periods for lifecycle tests:
 
 ```json
-{"callsign": "N1ADJ  M", "key_file": "<dir>/node.key", "listen": ["/ip4/192.168.1.105/tcp/0"],
+{"callsign": "N1ADJ  M", "data_dir": "<dir>", "listen": ["/ip4/192.168.1.105/tcp/0"],
  "bootstrap": ["/ip4/192.168.1.173/tcp/4001/p2p/<Pi 5 peer ID>"], "caps": [], "dht": true, "k": 2,
  "presence_interval": "60s", "sweep_interval": "60s", "record_refresh": "30s",
  "member_fail_sweeps": 3, "member_fail_silence": "2m", "takeover_period": "3m",
@@ -97,5 +97,5 @@ Restore the gateway (`sudo cp /etc/m17-gateway.ini.pre-qtc /etc/m17-gateway.ini`
 - Radio UIs send `N1ADJ M`, one space; the node matches its callsign ignoring space runs.
 - Stopping a station without DISC left M17-M17 holding the old link and refusing the next CONN; fixed in code, but a killed station still leaves a stale link for the reflector's timeout.
 - A freshly started station has an empty presence table for up to one presence interval; records created in that window see fewer candidates.
-- Mailboxes are in memory; a restart empties them and forgets the delivered-once table, so the replay window can redeliver.
+- With `data_dir` set, mailboxes and the delivered-once table are journaled there (`mailbox.jsonl`, `delivered.jsonl`) and survive a restart. Without it they are in memory: a restart empties them and the replay window can redeliver. `data_dir` also defaults the key to `<data_dir>/node.key`, so pointing it at `~/qtcd` keeps the existing peer ID.
 - The scratch directory holding laptop keys and configs is per session; keep test configs somewhere durable.

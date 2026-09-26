@@ -309,14 +309,7 @@ func (r *Station) deliverLocal(e *envelope.Envelope) {
 // markDelivered records a (message, device) delivery, returning false if it
 // already happened. RCPT and ROOM use their StoreID.
 func (r *Station) markDelivered(e *envelope.Envelope, device envelope.Address) bool {
-	k := deliveryKey{id: e.StoreID(), device: device}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, done := r.delivered[k]; done {
-		return false
-	}
-	r.delivered[k] = struct{}{}
-	return true
+	return r.delivered.mark(deliveryKey{id: e.StoreID(), device: device}, unixNow())
 }
 
 // issueReceipt builds a receipt from this node about msg and stores it on

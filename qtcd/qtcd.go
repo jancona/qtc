@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -46,8 +47,14 @@ type Config struct {
 	// callsign names the local room.
 	Callsign string
 	// KeyFile holds the node's ECDSA P-256 key in PKCS #8 PEM. It is
-	// generated if missing. Empty uses an ephemeral key (tests).
+	// generated if missing. Empty means DataDir/node.key, or an ephemeral key
+	// when DataDir is empty too (tests).
 	KeyFile string
+	// DataDir holds the node's persistent state: the mailbox journal, the
+	// delivered-once journal, and by default the key. Empty keeps all of it
+	// in memory, so a restart loses stored mailboxes and may repeat recent
+	// deliveries (tests).
+	DataDir string
 	// ListenAddrs are libp2p multiaddrs to listen on. Public stations should
 	// use a fixed port; others may use port 0.
 	ListenAddrs []string
@@ -137,6 +144,9 @@ func (c *Config) defaults() {
 	if c.Log == nil {
 		c.Log = slog.Default()
 	}
+	if c.KeyFile == "" && c.DataDir != "" {
+		c.KeyFile = filepath.Join(c.DataDir, "node.key")
+	}
 }
 
 // Station is a QTC node.
@@ -157,13 +167,14 @@ type Station struct {
 	dialer   *peerDialer
 	records  *recordStore
 	inet     *inetFace
-	mem      *store.MemStore
+	mem      mailboxStore
 	server   *store.Server
 
-	mu        sync.Mutex
-	homed     map[envelope.Address]*homed // by base callsign
-	delivered map[deliveryKey]struct{}
-	queued    map[envelope.ID]struct{} // QUEUED already issued
+	delivered *deliveredTable
+
+	mu     sync.Mutex
+	homed  map[envelope.Address]*homed // by base callsign
+	queued map[envelope.ID]struct{}    // QUEUED already issued
 
 	ctx     context.Context
 	cancel  context.CancelFunc
@@ -171,9 +182,11 @@ type Station struct {
 	wg      sync.WaitGroup
 }
 
-type deliveryKey struct {
-	id     envelope.ID
-	device envelope.Address
+// mailboxStore is this node's own mailbox: a store.MemStore, or a
+// store.FileStore when the node has a DataDir.
+type mailboxStore interface {
+	store.Store
+	Len() int
 }
 
 // New builds a Station from cfg without starting any network activity.
@@ -210,7 +223,7 @@ func New(cfg Config) (*Station, error) {
 		key:       key,
 		subs:      subs,
 		homed:     map[envelope.Address]*homed{},
-		delivered: map[deliveryKey]struct{}{},
+		delivered: newDeliveredTable(),
 		queued:    map[envelope.ID]struct{}{},
 	}
 	if cfg.Deliver == nil {
@@ -226,8 +239,19 @@ func New(cfg Config) (*Station, error) {
 func (r *Station) Start(ctx context.Context) error {
 	r.ctx, r.cancel = context.WithCancel(ctx)
 	r.started = time.Now()
+	if r.cfg.DataDir != "" {
+		// Opened here rather than in New so that New (and qtcd -print-id)
+		// never touches state files.
+		d, err := openDeliveredTable(filepath.Join(r.cfg.DataDir, "delivered.jsonl"), unixNow(), r.log)
+		if err != nil {
+			r.cancel()
+			return err
+		}
+		r.delivered = d
+	}
 	if err := r.startP2P(); err != nil {
 		r.cancel()
+		r.closeState()
 		return err
 	}
 	r.presence = newPresence(r)
@@ -284,6 +308,17 @@ func (r *Station) Stop() error {
 	if r.host != nil {
 		errs = append(errs, r.host.Close())
 	}
+	errs = append(errs, r.closeState())
+	return errors.Join(errs...)
+}
+
+// closeState closes the persistent state files, if any.
+func (r *Station) closeState() error {
+	var errs []error
+	if fs, ok := r.mem.(*store.FileStore); ok {
+		errs = append(errs, fs.Close())
+	}
+	errs = append(errs, r.delivered.close())
 	return errors.Join(errs...)
 }
 
@@ -347,6 +382,7 @@ func (r *Station) runExpiry() {
 			}
 			r.subs.Expire(now)
 			r.presence.expire(now)
+			r.delivered.expire(now)
 		}
 	}
 }

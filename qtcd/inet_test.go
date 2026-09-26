@@ -180,6 +180,10 @@ func TestM17Frame(t *testing.T) {
 }
 
 func TestInetFace(t *testing.T) {
+	// Fast keepalives, set before any session goroutine reads them.
+	oldRetry, oldPing := connRetryInterval, clientPingInterval
+	connRetryInterval, clientPingInterval = 200*time.Millisecond, 200*time.Millisecond
+	t.Cleanup(func() { connRetryInterval, clientPingInterval = oldRetry, oldPing })
 	upstream := newUDPPeer(t) // the fake M17-M17
 	gateway := newUDPPeer(t)  // the fake hotspot gateway
 	node := mustAddr(t, "N1ADJ  Z")
@@ -211,7 +215,6 @@ func TestInetFace(t *testing.T) {
 
 	// QTC module A: CONN forwarded with the upstream module letter; resent
 	// until the reflector answers; ACKN back.
-	connRetryInterval = 200 * time.Millisecond
 	gateway.sendTo(t, station, connDatagram(gwCall, 'A'))
 	gateway.expect(t, magicACKN) // answered by the node itself
 	conn, upFrom := upstream.expect(t, magicCONN)
@@ -235,7 +238,6 @@ func TestInetFace(t *testing.T) {
 	})
 	// The node answers reflector PINGs itself and PINGs the gateway itself;
 	// neither side's keepalive crosses the node.
-	clientPingInterval = 200 * time.Millisecond
 	upstream.sendTo(t, upFrom, controlDatagram(magicPING, 0))
 	pong, _ := upstream.expect(t, magicPONG)
 	if envelope.AddressFromBytes(pong[4:10]) != gwCall {
@@ -371,6 +373,68 @@ func TestInetFace(t *testing.T) {
 	face.mu.Unlock()
 	if n != 0 {
 		t.Errorf("%d sessions after DISC", n)
+	}
+}
+
+func TestInetAllowCallsigns(t *testing.T) {
+	upstream := newUDPPeer(t)
+	start := func(gateways []*net.IPNet) (*stubCore, *net.UDPAddr) {
+		core := &stubCore{node: mustAddr(t, "N1ADJ  Z"), local: mustRoom(t, "N1ADJ")}
+		face, err := newInetFace(core, InetConfig{
+			Listen:         "127.0.0.1:0",
+			Gateways:       gateways,
+			AllowCallsigns: []string{"N1ADJ", "w1aw"},
+			Modules:        map[byte]ModuleConfig{'A': {Reflector: upstream.addr().String(), Module: 'C', Mode: ModeQTC}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() { face.run(ctx); close(done) }()
+		t.Cleanup(func() { cancel(); <-done })
+		return core, face.Addr()
+	}
+	ht, w1aw, stranger := mustAddr(t, "N1ADJ  H"), mustAddr(t, "W1AW"), mustAddr(t, "AB1CD")
+
+	// No gateway ranges: the loopback client is an internet client.
+	core, station := start([]*net.IPNet{})
+	client := newUDPPeer(t)
+	client.sendTo(t, station, connDatagram(stranger, 'A'))
+	client.expect(t, magicNACK)
+	upstream.expectNone(t, magicCONN, 200*time.Millisecond)
+
+	client.sendTo(t, station, connDatagram(ht, 'A')) // a device of an allowed base
+	client.expect(t, magicACKN)
+	upstream.expect(t, magicCONN)
+
+	// On the allowed session, a packet claiming a stranger's source is
+	// dropped; stream frames from it pass but register no presence.
+	client.sendTo(t, station, smsDatagram(w1aw, stranger, "spoofed"))
+	client.sendTo(t, station, streamDatagram(w1aw, stranger))
+	upstream.expect(t, magicM17S)
+	client.sendTo(t, station, smsDatagram(w1aw, ht, "legit"))
+	eventually(t, "allowed SMS ingested", 2*time.Second, func() bool { return core.sentCount() == 1 })
+	core.mu.Lock()
+	if core.sent[0].Source() != ht {
+		t.Errorf("ingested %s", core.sent[0])
+	}
+	if len(core.heard) != 1 || core.heard[0] != ht || core.vias[0] != ViaInternet {
+		t.Errorf("heard %v via %v; want only %s via internet", core.heard, core.vias, ht)
+	}
+	core.mu.Unlock()
+
+	// Gateways are not limited.
+	core, station = start(nil) // default ranges include loopback
+	gw := newUDPPeer(t)
+	gw.sendTo(t, station, connDatagram(stranger, 'A'))
+	gw.expect(t, magicACKN)
+	gw.sendTo(t, station, smsDatagram(w1aw, stranger, "from RF"))
+	eventually(t, "gateway SMS ingested", 2*time.Second, func() bool { return core.sentCount() == 1 })
+
+	if _, err := newInetFace(&stubCore{}, InetConfig{Listen: "127.0.0.1:0", AllowCallsigns: []string{"#NET"},
+		Modules: map[byte]ModuleConfig{'A': {Reflector: upstream.addr().String(), Module: 'C', Mode: ModeQTC}}}); err == nil {
+		t.Error("accepted a non-callsign in AllowCallsigns")
 	}
 }
 

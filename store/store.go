@@ -154,6 +154,35 @@ func (m *MemStore) Expire(now uint32) int {
 	return n
 }
 
+// check reports whether Put would find rec a duplicate, or refuse it for
+// quota, without storing it.
+func (m *MemStore) check(rec Record) (dup bool, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	b := m.boxes[rec.Callsign]
+	if b == nil {
+		return false, nil
+	}
+	if _, dup := b.byID[rec.ID()]; dup {
+		return true, nil
+	}
+	if m.MaxPerCallsign > 0 && len(b.recs) >= m.MaxPerCallsign {
+		return false, ErrQuota
+	}
+	return false, nil
+}
+
+// all returns every stored record, each callsign's in store order.
+func (m *MemStore) all() []Record {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []Record
+	for _, b := range m.boxes {
+		out = append(out, b.recs...)
+	}
+	return out
+}
+
 // Len reports the number of stored records.
 func (m *MemStore) Len() int {
 	m.mu.Lock()
