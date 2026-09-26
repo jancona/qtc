@@ -276,7 +276,7 @@ func (rs *recordStore) repair(ctx context.Context, rec *MailboxRecord, failed []
 			drop = append(drop, id)
 		}
 	}
-	if len(drop) == 0 {
+	if len(drop) == 0 && len(rec.Members) >= int(rec.K) {
 		return nil, nil
 	}
 	keep := make([]peer.ID, 0, len(rec.Members))
@@ -305,7 +305,7 @@ func (rs *recordStore) repair(ctx context.Context, rec *MailboxRecord, failed []
 	}
 	next := *rec
 	next.Version, next.Members = rec.Version+1, keep
-	rs.r.log.Warn("repairing mailbox record", "callsign", rec.Callsign, "dropped", drop, "members", keep)
+	rs.r.log.Warn("repairing mailbox record", "callsign", rec.Callsign, "dropped", drop, "members", keep, "k", rec.K)
 	if err := rs.write(ctx, &next, "repair"); err != nil {
 		return nil, err
 	}

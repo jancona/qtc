@@ -160,7 +160,7 @@ The home station is the node named in the mailbox record. It alone writes record
 
 On each sweep, the home station checks every member. A member is *failed* if it has been unreachable across at least three sweeps **and** its node has been silent in presence for the failure period (default 24 hours), so that a local network problem does not churn the record. For each failed member, the home station recruits a mailbox-capable public station not already in the set, PUTs the callsign's entire retained history to it (from the sweep union), removes the failed member, and writes a new record version.
 
-If the set is larger than `k` because of concurrent repair, the home station may trim it at the next repair, preferring to drop the member least recently reachable.
+If the set is smaller than `k` because no replacement was available at repair time, the home station recruits on a later sweep as soon as a mailbox-capable station is known, copying the history the same way. If the set is larger than `k` because of concurrent repair, the home station may trim it at the next repair, preferring to drop the member least recently reachable.
 
 ### 8.3 Migration
 

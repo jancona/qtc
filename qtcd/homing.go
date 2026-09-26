@@ -191,7 +191,7 @@ func (r *Station) sweep(h *homed) bool {
 	if reached == 0 {
 		return false
 	}
-	if len(failed) > 0 && rec.HomeStation == r.host.ID() {
+	if (len(failed) > 0 || len(rec.Members) < int(rec.K)) && rec.HomeStation == r.host.ID() {
 		// Repair copies the callsign's whole retained history to the
 		// recruit, not just this sweep's increment.
 		if next, err := r.records.repair(ctx, rec, failed, r.fullHistory(ctx, h.base, members)); err != nil {
