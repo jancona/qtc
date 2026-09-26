@@ -117,10 +117,10 @@ Bugs and conventions that came out of the run, all fixed and in the specs:
 
 ## Hole punching across two NATs (2026-09-22)
 
-The one path the spike had not exercised. Setup: the public station on the Pi 5 (44.27.19.158, home network, 44net address); a station on an Intel box on the home LAN behind the home router (public address 71.181.76.200); a station on the laptop behind Starlink's CGNAT (public address 153.66.125.182), with WireGuard disconnected so nothing could shortcut through the home tunnel, and the laptop's libp2p host bound to the Starlink interface only.
+The one path the spike had not exercised. Setup: the public station on the Pi 5 (44.27.19.158, home network, 44net address); a station on an Intel box on the home LAN behind the home router; a station on the laptop behind Starlink's CGNAT, with WireGuard disconnected so nothing could shortcut through the home tunnel, and the laptop's libp2p host bound to the Starlink interface only.
 
 - Both stations linked to the public station over the internet and reserved circuit relay slots.
-- Within 60 s of the laptop starting, the two stations had learned of each other from presence, connected through the public station's circuit relay, and hole-punched a direct TCP connection: the laptop saw the home station at 71.181.76.200:34279 and the home station saw the laptop at 153.66.125.182:43908. The home station then dropped its relayed path and kept only the direct one; the laptop kept both.
+- Within 60 s of the laptop starting, the two stations had learned of each other from presence, connected through the public station's circuit relay, and hole-punched a direct TCP connection: the laptop saw the home station at the home router's public address and the home station saw the laptop at a Starlink CGNAT address. The home station then dropped its relayed path and kept only the direct one; the laptop kept both.
 - A message from the laptop's device to the home station's device was delivered and both receipts came back within a second.
 
 So hole punching works through Starlink's CGNAT to a home router, at least for this pair, and the relay fallback was there for the seconds before it did. That closes the last open item from the spike's decision on libp2p.
