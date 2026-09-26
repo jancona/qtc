@@ -128,3 +128,24 @@ So hole punching works through Starlink's CGNAT to a home router, at least for t
 ## Milestone 5: mailbox records (2026-09-22, in-process only)
 
 Records replace the static member list. An in-process test with three public mailbox stations and two stations behind them checks: the first station to home a callsign writes version 1 naming itself home station and two mailbox-capable public stations; a sender reads it from the DHT and delivers through those members; a sender's message to an unheard callsign creates a provisional record that the first station to hear the callsign takes over as version 2, after which the stored message reaches the device by sweep; and when a member is stopped, the home station's sweeps count the failures, the member's presence silence passes the configured period, and the home station writes version 2 replacing it with the remaining public station after copying the callsign's full history there. Not yet run on real hardware.
+
+## Milestone 5 on real nodes (2026-09-26)
+
+Home LAN: public mailbox stations on the Pi 5 (`N1ADJ  P`), the Intel box (`N1ADJ  X`), and a second process on the laptop (`N1ADJ  Y`); the home station `N1ADJ  M` on the laptop with the client face, the CC1200 hotspot linked to it, and the CS7000 radio as `N1ADJ 8`. The home station ran with sweeps every minute, member failure after 3 unreachable sweeps and 2 minutes of presence silence, and a 3-minute takeover period.
+
+| Step | Result |
+|---|---|
+| Creation | Keying up produced version 1 within the same second: home station the laptop, members the Intel box and the Pi 5. |
+| Sender lookup | The Pi 5 had learned the record from the announcement; a message from its `N0CALL` device reached the radio as SMS in under a second, with QUEUED and TRANSMITTED receipts back. |
+| Provisional handoff | A message from `N0CALL` to the never-heard `AB1CD` produced a provisional version 1 naming the Pi 5; when the Intel box heard `AB1CD` it wrote version 2 within a second and the stored message was delivered there. |
+| Repair | Stopping the Intel box: three failed sweeps at one-minute intervals, then version 2 of N1ADJ's record replaced it with the laptop's public station, which received a copy of the history. Two and a half minutes from stop to repair. |
+| Takeover | Stopping the home station and having the laptop's public station hear the radio produced a takeover, but instantly and for the wrong reason (below). After the fix, a proper run: the home station saw the new home station silent for exactly 3 minutes and wrote version 4, then repaired the stopped member out as version 5. |
+| Top-up | With only one member left and the others back, the next sweep wrote version 6 with two members. |
+| Messaging on the final record | SMS from the radio to `N0CALL` delivered at the Pi 5; reply from `N0CALL` delivered to the radio with receipts, both through version 6. |
+
+Two things the run found that the in-process test had not:
+
+- A freshly started station treated a node it had never seen in presence as silent forever, and took over a record on that basis within a second of hearing the callsign. Silence of an unknown node is now counted from the station's own start (node protocol §8.4).
+- Repair only fired on failures, so a record left below `k` when no replacement was available stayed short. The home station now recruits on a later sweep once a candidate is known (§8.2).
+
+Also noted: a station's presence table can lag the network by up to one presence interval after a restart, which made the first repair pick from fewer candidates than existed. Harmless here; worth remembering when reading logs.
