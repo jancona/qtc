@@ -87,6 +87,10 @@ Done, with results in `spike-results.md`:
 3. **Legacy messaging end to end.** SMS from an OpenRTX radio through a hotspot station and back, room commands and room messages by SMS convention.
 4. **Home station and repair.** Mailbox record lifecycle: creation, sender lookup, provisional handoff, repair, takeover, top-up.
 
+In progress:
+
+5. **Invite-only test.** Known hotspot operators run stations and internet-only users connect with a client. Exit criteria: mailboxes and the delivered-once table survive a restart; `qtcd` installs from a released `.deb` (optionally via the hotspot installer) and runs under systemd; `qtc chat` and a desktop/Android app reach a station's QTC module; an optional callsign allowlist guards the internet face; operator and user guides exist, including known limitations; a release candidate runs the testbed for 24 hours from CI artifacts alone. Quotas and callsign verification are deliberately out of scope, which is why the test is invite-only.
+
 Later, demand-driven rather than sequenced:
 
 - **Native envelope in a radio.** OpenRTX speaks MSG/RCPT so receipts and dedup work on the radio itself. OpenRTX has no released SMS client yet, so this waits for adoption to create the demand; the envelope and client face are ready for it.
