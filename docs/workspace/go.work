@@ -1,0 +1,8 @@
+// Workspace for the qtc and m17 checkouts, so qtc resolves
+// github.com/jancona/m17 to the local checkout.
+go 1.26.2
+
+use (
+	./qtc
+	./m17
+)
