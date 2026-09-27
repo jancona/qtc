@@ -8,6 +8,7 @@
 //	qtc fixtures [file]
 //	qtc store put|query|watch -peer <multiaddr> ...
 //	qtc send -from CALL -to CALL|#ROOM -body TEXT [-rcpt] [-ttl MIN] [-admin host:port] [-json]
+//	qtc chat -callsign CALL -node host[:port] | -reflector NAME [-hosts file] [-module A]
 //	qtc version
 package main
 
@@ -25,6 +26,7 @@ var commands = map[string]struct {
 	"fixtures": {runFixtures, "check docs/qtc-fixtures.json (or the given file) against the envelope package"},
 	"store":    {runStore, "put, query, or watch a mailbox node over libp2p"},
 	"send":     {runSend, "build a MSG and print it or hand it to a running station's admin interface"},
+	"chat":     {runChat, "chat through a QTC node: direct messages and rooms, as an internet client"},
 	"version":  {runVersion, "print the version"},
 }
 
@@ -55,7 +57,7 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage: qtc <command> [flags]\n\ncommands:")
-	for _, name := range []string{"decode", "keys", "fixtures", "store", "send", "version"} {
+	for _, name := range []string{"chat", "send", "decode", "keys", "fixtures", "store", "version"} {
 		fmt.Fprintf(os.Stderr, "  %-9s %s\n", name, commands[name].help)
 	}
 }

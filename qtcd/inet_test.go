@@ -444,6 +444,51 @@ func TestInetAllowCallsigns(t *testing.T) {
 	}
 }
 
+// TestInetClientHeardWhileLinked: an internet client on a qtc module is
+// heard as soon as it links, without sending anything; a gateway is not.
+func TestInetClientHeardWhileLinked(t *testing.T) {
+	upstream := newUDPPeer(t)
+	start := func(gateways []*net.IPNet) (*stubCore, *net.UDPAddr) {
+		core := &stubCore{node: mustAddr(t, "N1ADJ  Z"), local: mustRoom(t, "N1ADJ")}
+		face, err := newInetFace(core, InetConfig{
+			Listen:   "127.0.0.1:0",
+			Gateways: gateways,
+			Modules:  map[byte]ModuleConfig{'A': {Reflector: upstream.addr().String(), Module: 'C', Mode: ModeQTC}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() { face.run(ctx); close(done) }()
+		t.Cleanup(func() { cancel(); <-done })
+		return core, face.Addr()
+	}
+	me := mustAddr(t, "W1AW")
+
+	core, station := start([]*net.IPNet{}) // loopback is an internet client
+	client := newUDPPeer(t)
+	client.sendTo(t, station, connDatagram(me, 'A'))
+	client.expect(t, magicACKN)
+	eventually(t, "client heard on link", 2*time.Second, func() bool {
+		core.mu.Lock()
+		defer core.mu.Unlock()
+		return len(core.heard) == 1 && core.heard[0] == me && core.vias[0] == ViaInternet
+	})
+
+	core, station = start(nil) // loopback is a gateway
+	gw := newUDPPeer(t)
+	gw.sendTo(t, station, connDatagram(me, 'A'))
+	gw.expect(t, magicACKN)
+	time.Sleep(200 * time.Millisecond)
+	core.mu.Lock()
+	n := len(core.heard)
+	core.mu.Unlock()
+	if n != 0 {
+		t.Errorf("gateway link heard %d devices; only what it carries should count", n)
+	}
+}
+
 // TestGatewayRelinkKeepsRadios: when a gateway's link closes and it links
 // again (a restart), the radios it carried are reattached to the new link.
 func TestGatewayRelinkKeepsRadios(t *testing.T) {

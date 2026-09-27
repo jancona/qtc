@@ -121,6 +121,8 @@ type inetSession struct {
 	acked   bool      // upstream answered our CONN
 	lastUp  time.Time // last PING or PONG from upstream
 	connReq []byte    // the CONN/LSTN as sent upstream, resent until acked
+
+	lastKeepHeard time.Time // internet clients: when keepHeard last heard the callsign
 }
 
 // Link keepalive timing. The node PINGs its client like any reflector, and
@@ -399,6 +401,7 @@ func (f *inetFace) connect(b []byte, addr *net.UDPAddr) {
 	go s.readUpstream()
 	go s.retryConn()
 	go s.pingClient()
+	s.keepHeard()
 }
 
 // pingClient keeps the client's link alive the way a reflector does.
@@ -458,6 +461,31 @@ func (s *inetSession) touch() {
 	s.mu.Lock()
 	s.last = time.Now()
 	s.mu.Unlock()
+	s.keepHeard()
+}
+
+// internetHeardInterval is how often a linked internet client's callsign is
+// heard again while its link stays up.
+const internetHeardInterval = time.Minute
+
+// keepHeard hears an internet client's own callsign when it links and then
+// while its link stays up, on a qtc module. Someone at a client is present
+// while it is connected, so its messages are in reach (node protocol §7.4)
+// without it having to send. A gateway's link says nothing about whether a
+// radio is listening, so gateways are heard only by what they carry.
+func (s *inetSession) keepHeard() {
+	if !s.qtcMode || s.via != ViaInternet {
+		return
+	}
+	s.mu.Lock()
+	due := time.Since(s.lastKeepHeard) >= internetHeardInterval
+	if due {
+		s.lastKeepHeard = time.Now()
+	}
+	s.mu.Unlock()
+	if due {
+		s.heard(s.callsign)
+	}
 }
 
 func (s *inetSession) forwardUp(b []byte) {
