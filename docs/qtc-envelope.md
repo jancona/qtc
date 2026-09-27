@@ -155,7 +155,7 @@ A MSG whose Destination is a room is delivered to every client subscribed to tha
 
 - Receipts never generate receipts.
 - A receipt may be signed (§5.4); DELIVERED by the recipient's key once user keys exist, TRANSMITTED/QUEUED/EXPIRED by the node's key.
-- QUEUED, TRANSMITTED, EXPIRED, and DELIVERED are sent only if RCPT_REQ was set. REJECTED may always be sent.
+- QUEUED, TRANSMITTED, EXPIRED, and DELIVERED are sent only if RCPT_REQ was set. REJECTED may always be sent. This governs receipts to the sender. Separately, a node may store delivery records in the recipient's own mailbox (Node Protocol §7.6): RCPTs addressed to the recipient, marked by their note, used only between nodes and never delivered as receipts.
 - A receipt's Source is the callsign of whoever observed the status: the node's callsign for QUEUED, TRANSMITTED, and EXPIRED; the recipient's callsign for DELIVERED.
 - A message may produce both TRANSMITTED (from the node) and DELIVERED (from a client that speaks MSG). A legacy radio produces only TRANSMITTED.
 - Receipts are best-effort. Nodes may store them for delivery back to the sender, but not beyond the original message's expiry.

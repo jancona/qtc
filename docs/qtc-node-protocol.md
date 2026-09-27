@@ -152,7 +152,13 @@ On EVENT, or on a message found by a sweep, a station delivers once per local de
 
 ### 7.5 Replay
 
-A station replays when it starts homing a callsign, and when it hears a device of a callsign it already homes that was out of reach or has held messages. It sweeps from time 0 (§7.2) and, for each local device in reach, takes the MSGs the device has not had and for which no DELIVERED receipt exists. It sends at most the replay limit (§11) of them, the most recent, oldest first. It records the older ones as delivered so they are never offered again, and first sends the device one MSG from the node callsign saying how many it left out (for example "7 older messages not sent"). The limit bounds what a returning radio is sent on RF; the TTL bounds how old a message can be. Native clients can still QUERY the mailbox for anything the limit left out.
+A station replays when it starts homing a callsign, and when it hears a device of a callsign it already homes that was out of reach or has held messages. It sweeps from time 0 (§7.2) and, for each local device in reach, takes the MSGs the device has not had and for which the mailbox holds neither a DELIVERED receipt nor a delivery record (§7.6). It sends at most the replay limit (§11) of them, the most recent, oldest first. It records the older ones as delivered, locally and with a `qtc:replay-limit` delivery record, so they are never offered again by this station or any other, and first sends the device one MSG from the node callsign saying how many it left out (for example "7 older messages not sent"). The limit bounds what a returning radio is sent on RF; the TTL bounds how old a message can be. Native clients can still QUERY the mailbox for anything the limit left out.
+
+### 7.6 Delivery records
+
+A station's delivered-once table is its own, and a legacy radio never sends DELIVERED, so without more a radio that moves to another hotspot would be replayed the same messages again. A station that transmits a MSG to a local device therefore also stores, in the mailbox of the device's base callsign, a **delivery record**: a RCPT from the node callsign, addressed to that base callsign (not to the message's sender), with status TRANSMITTED and the note `qtc:delivered`. A message the replay limit leaves out gets one with status EXPIRED and the note `qtc:replay-limit`. Every station homing the callsign sees them in its sweeps and does not replay those messages (§7.5).
+
+Delivery records are for stations, not devices: they are never delivered to a device, and they are not receipts to the sender, which are issued only as §7.4 and Message Envelope §5 describe. They are per callsign, not per device, so someone with two radios on two different hotspots receives each message on one of them. They expire like any RCPT (§11 message retention).
 
 ## 8. Home stations and Repair
 

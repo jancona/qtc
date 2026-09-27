@@ -20,7 +20,7 @@ Reasoning is in the docs. Do not "simplify" these away.
 - Only the home station writes a callsign's mailbox record (plus silent-period takeover and provisional handoff). Convention, not DHT-enforced; known gap awaiting user keys.
 - Node keys now (ECDSA secp256r1), user keys later. Do not invent a user identity scheme.
 - No `@ALL`. Node-callsign rooms replace it. Explicit LEAVE is sticky.
-- Legacy SMS radios are terminals: no sync, no dedup. Invest in the native envelope path instead.
+- Legacy SMS radios are terminals: no sync. Invest in the native envelope path instead. The one exception, decided 2026-09-27: stations share delivery records through the recipient's mailbox (node protocol §7.6), so a radio moving between hotspots is not replayed messages it already had. Keep that mechanism minimal.
 - No confidentiality. TLS authenticates nodes; content is plaintext. Never say "encrypted".
 - Packet types `0x08` MSG, `0x09` RCPT, `0x0A` ROOM are provisional; `0x07` is TLE in M17 3.0.0 and must not be used. Keep them as named constants in one place.
 

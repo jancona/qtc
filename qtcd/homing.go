@@ -272,10 +272,11 @@ func (r *Station) sweepSince(h *homed, from int64) bool {
 		}
 	}
 
-	// Which messages already have a DELIVERED receipt in the mailbox?
+	// Which messages are done: a DELIVERED receipt, or a delivery record from
+	// any node (node protocol §7.4) saying it was transmitted or skipped?
 	delivered := map[envelope.ID]bool{}
 	for _, e := range union {
-		if rc, ok := e.Rcpt(); ok && rc.Status() == envelope.StatusDelivered {
+		if rc, ok := e.Rcpt(); ok && (rc.Status() == envelope.StatusDelivered || isDeliveryRecord(e)) {
 			delivered[rc.MessageID()] = true
 		}
 	}
@@ -323,7 +324,11 @@ func (r *Station) onStored(callsign envelope.Address, e *envelope.Envelope, from
 // the mailbox, and the device gets a replay when it is next heard.
 
 // deliverLocal delivers a MSG or RCPT to the local devices it addresses.
+// Delivery records are for nodes, not devices.
 func (r *Station) deliverLocal(e *envelope.Envelope) {
+	if isDeliveryRecord(e) {
+		return
+	}
 	now := unixNow()
 	for _, d := range r.targets(e) {
 		r.deliverOne(e, d, now)
@@ -383,10 +388,49 @@ func (r *Station) deliverOne(e *envelope.Envelope, d envelope.Address, now uint3
 		}
 		return false
 	}
-	if m, ok := e.Msg(); ok && m.RcptReq() && !e.Destination().IsRoom() {
-		r.issueReceipt(e, envelope.StatusTransmitted, r.presence.lastHeard(d), now)
+	if m, ok := e.Msg(); ok {
+		r.recordDelivery(e, d, envelope.StatusTransmitted, recordTransmitted, now)
+		if m.RcptReq() && !e.Destination().IsRoom() {
+			r.issueReceipt(e, envelope.StatusTransmitted, r.presence.lastHeard(d), now)
+		}
 	}
 	return true
+}
+
+// Delivery records (node protocol §7.4) are RCPTs a node stores in a
+// recipient's own mailbox, addressed to the recipient, saying a MSG was
+// transmitted to one of its devices or left out by the replay limit. Other
+// nodes homing the callsign read them in their sweeps and do not replay
+// those messages, so a radio moving between hotspots is not sent the same
+// messages again. The note marks them; they are never delivered to a device
+// and are not receipts to the sender, whose receipts are unchanged.
+const (
+	recordTransmitted = "qtc:delivered"
+	recordSkipped     = "qtc:replay-limit"
+)
+
+func isDeliveryRecord(e *envelope.Envelope) bool {
+	rc, ok := e.Rcpt()
+	if !ok {
+		return false
+	}
+	switch rc.Note() {
+	case recordTransmitted, recordSkipped:
+		return true
+	}
+	return false
+}
+
+// recordDelivery stores a delivery record for msg in the mailbox of device's
+// callsign.
+func (r *Station) recordDelivery(msg *envelope.Envelope, device envelope.Address, status envelope.Status, note string, now uint32) {
+	base := device.Base()
+	rc, err := envelope.BuildRcpt(r.callsign, base, msg.ID(), status, now, 0, note)
+	if err != nil {
+		r.log.Error("build delivery record", "err", err)
+		return
+	}
+	r.mailbox.putAll(base, rc, nil)
 }
 
 // reachable reports whether device was heard within ReachWindow.
@@ -433,6 +477,7 @@ func (r *Station) replay(msgs []*envelope.Envelope, now uint32) {
 		if n := len(list) - r.cfg.ReplayLimit; n > 0 {
 			for _, e := range list[:n] {
 				if r.delivered.skip(deliveryKey{id: e.StoreID(), device: d}, now) {
+					r.recordDelivery(e, d, envelope.StatusExpired, recordSkipped, now)
 					skipped++
 				}
 			}
