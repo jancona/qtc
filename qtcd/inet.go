@@ -64,6 +64,7 @@ type InetConfig struct {
 // face can be tested against a stub.
 type inetCore interface {
 	inetHeard(device envelope.Address, via Via, now uint32) error
+	inetRelinked(devices []envelope.Address)
 	inetSend(e *envelope.Envelope) error
 	inetRoom(device envelope.Address, req *envelope.Envelope) (*envelope.Envelope, error)
 	inetCallsign() envelope.Address
@@ -76,7 +77,8 @@ type inetCore interface {
 func (r *Station) inetHeard(d envelope.Address, via Via, now uint32) error {
 	return r.Heard(d, via, now)
 }
-func (r *Station) inetSend(e *envelope.Envelope) error { return r.Send(e) }
+func (r *Station) inetRelinked(devices []envelope.Address) { r.Relinked(devices) }
+func (r *Station) inetSend(e *envelope.Envelope) error     { return r.Send(e) }
 func (r *Station) inetRoom(d envelope.Address, req *envelope.Envelope) (*envelope.Envelope, error) {
 	return r.HandleRoom(d, req)
 }
@@ -96,6 +98,7 @@ type inetFace struct {
 	mu       sync.Mutex
 	sessions map[string]*inetSession           // by client address
 	devices  map[envelope.Address]*inetSession // device -> qtc-mode session that heard it
+	orphans  map[envelope.Address]orphan       // devices whose gateway link closed, until it relinks
 	wg       sync.WaitGroup
 	ctx      context.Context
 	cancel   context.CancelFunc
@@ -158,6 +161,7 @@ func newInetFace(core inetCore, cfg InetConfig) (*inetFace, error) {
 		upstream: map[byte]*net.UDPAddr{},
 		sessions: map[string]*inetSession{},
 		devices:  map[envelope.Address]*inetSession{},
+		orphans:  map[envelope.Address]orphan{},
 	}
 	for _, c := range cfg.AllowCallsigns {
 		a, err := envelope.EncodeAddress(strings.TrimSpace(c))
@@ -376,7 +380,12 @@ func (f *inetFace) connect(b []byte, addr *net.UDPAddr) {
 		old.close(true)
 	}
 	f.sessions[addr.String()] = s
+	relinked := f.adoptOrphans(s)
 	f.mu.Unlock()
+	if len(relinked) > 0 {
+		f.log.Info("gateway relinked; radios reattached", "client", addr, "callsign", s.callsign, "devices", relinked)
+		f.core.inetRelinked(relinked)
+	}
 	f.log.Info("client linking", "client", addr, "callsign", s.callsign, "module", string(module),
 		"upstream", f.upstream[module], "upstream_module", string(mod.Module), "mode", mod.Mode)
 	// The client is linked to this node, not to the upstream: answer it now
@@ -477,8 +486,40 @@ func (s *inetSession) close(disc bool) {
 	for d, owner := range s.face.devices {
 		if owner == s {
 			delete(s.face.devices, d)
+			if s.via == ViaRF {
+				s.face.orphans[d] = orphan{gateway: s.callsign, module: s.module, at: time.Now()}
+			}
 		}
 	}
+}
+
+// orphan is a device heard through a gateway whose link has closed. A
+// gateway restarting (a config change, an upgrade, a reboot) relinks under
+// the same callsign and module; its radios have not gone anywhere.
+type orphan struct {
+	gateway envelope.Address
+	module  byte
+	at      time.Time
+}
+
+// orphanTTL bounds how long a closed gateway link's devices are remembered.
+const orphanTTL = 24 * time.Hour
+
+// adoptOrphans reattaches to a new gateway session the devices its
+// previous link had heard, and returns them. Callers hold f.mu.
+func (f *inetFace) adoptOrphans(s *inetSession) []envelope.Address {
+	var out []envelope.Address
+	for d, o := range f.orphans {
+		switch {
+		case time.Since(o.at) > orphanTTL:
+			delete(f.orphans, d)
+		case s.via == ViaRF && s.qtcMode && o.gateway == s.callsign && o.module == s.module:
+			delete(f.orphans, d)
+			f.devices[d] = s
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 // heard publishes presence for a device seen on a qtc module, at most
@@ -498,6 +539,7 @@ func (s *inetSession) heard(device envelope.Address) {
 	s.mu.Unlock()
 	s.face.mu.Lock()
 	s.face.devices[device] = s
+	delete(s.face.orphans, device)
 	s.face.mu.Unlock()
 	if err := s.face.core.inetHeard(device, s.via, uint32(now.Unix())); err != nil {
 		s.face.log.Debug("heard", "device", device, "err", err)
@@ -738,7 +780,7 @@ func (f *inetFace) deliver(device envelope.Address, e *envelope.Envelope) bool {
 	s := f.devices[device]
 	f.mu.Unlock()
 	if s == nil {
-		f.log.Info("no link to device; held", "device", device)
+		f.log.Debug("no link to device", "device", device)
 		return false
 	}
 	if e.Type() != envelope.TypeMSG {

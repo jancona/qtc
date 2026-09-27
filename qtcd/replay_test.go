@@ -132,3 +132,61 @@ func TestHandoffFailureHolds(t *testing.T) {
 		t.Errorf("%d deliveries recorded", n)
 	}
 }
+
+// TestReplaySameSecondKeepsOrder: messages with one timestamp are replayed,
+// and capped, in the order the mailbox gave them, not by ID.
+func TestReplaySameSecondKeepsOrder(t *testing.T) {
+	var got deliveries
+	r := startStation(t, Config{Callsign: "N1ADJ  Z"}, &got)
+	ht, w1aw := mustAddr(t, "N1ADJ  H"), mustAddr(t, "W1AW")
+	now := unixNow()
+	r.presence.heard(ht, ViaLocal, now)
+	var msgs []*envelope.Envelope
+	for i := 1; i <= 12; i++ {
+		msgs = append(msgs, mustMsg(t, w1aw, ht, now-5, 60, uint16(1000-i), 0, fmt.Sprintf("test %d", i)))
+	}
+	r.replay(msgs, now)
+	var bodies []string
+	for _, d := range got.list {
+		bodies = append(bodies, bodyOf(d.env))
+	}
+	want := []string{"2 older messages not sent", "test 3", "test 4", "test 5", "test 6", "test 7", "test 8", "test 9", "test 10", "test 11", "test 12"}
+	if fmt.Sprint(bodies) != fmt.Sprint(want) {
+		t.Errorf("replay sent %q\nwant %q", bodies, want)
+	}
+}
+
+// TestRelinkedReplaysHeld: messages held while a radio's gateway link was
+// down are replayed when the link comes back, without the radio sending.
+func TestRelinkedReplaysHeld(t *testing.T) {
+	var got deliveries
+	key := filepath.Join(t.TempDir(), "node.key")
+	probe, err := New(Config{Callsign: "N1ADJ  Z", KeyFile: key})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := probe.PeerID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := startStation(t, Config{Callsign: "N1ADJ  Z", KeyFile: key, Caps: CapMailbox, MailboxMembers: []string{id.String()}}, &got)
+	ht, w1aw := mustAddr(t, "N1ADJ  H"), mustAddr(t, "W1AW")
+	now := unixNow()
+	if err := r.Heard(ht, ViaLocal, now-2*3600); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "homing", 5*time.Second, func() bool { return r.homes(ht) })
+	for i := 0; i < 3; i++ {
+		if _, err := r.server.PutLocal(ht, mustMsg(t, w1aw, ht, now-10+uint32(i), 60, uint16(i), 0, fmt.Sprintf("m%d", i))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	eventually(t, "held", 2*time.Second, func() bool {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		return r.held[ht]
+	})
+	r.presence.heard(ht, ViaLocal, now) // in reach again, but not through Heard
+	r.Relinked([]envelope.Address{ht})
+	eventually(t, "replay on relink", 10*time.Second, func() bool { return got.count(func(delivery) bool { return true }) == 3 })
+}

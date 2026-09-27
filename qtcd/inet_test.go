@@ -24,6 +24,7 @@ type stubCore struct {
 	sent     []*envelope.Envelope
 	roomReqs []*envelope.Envelope
 	joined   []envelope.Address
+	relinked []envelope.Address
 	node     envelope.Address
 	local    envelope.Address
 }
@@ -34,6 +35,11 @@ func (c *stubCore) inetHeard(d envelope.Address, via Via, _ uint32) error {
 	c.heard = append(c.heard, d)
 	c.vias = append(c.vias, via)
 	return nil
+}
+func (c *stubCore) inetRelinked(devices []envelope.Address) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.relinked = append(c.relinked, devices...)
 }
 func (c *stubCore) inetSend(e *envelope.Envelope) error {
 	c.mu.Lock()
@@ -436,6 +442,64 @@ func TestInetAllowCallsigns(t *testing.T) {
 		Modules: map[byte]ModuleConfig{'A': {Reflector: upstream.addr().String(), Module: 'C', Mode: ModeQTC}}}); err == nil {
 		t.Error("accepted a non-callsign in AllowCallsigns")
 	}
+}
+
+// TestGatewayRelinkKeepsRadios: when a gateway's link closes and it links
+// again (a restart), the radios it carried are reattached to the new link.
+func TestGatewayRelinkKeepsRadios(t *testing.T) {
+	upstream := newUDPPeer(t)
+	core := &stubCore{node: mustAddr(t, "N1ADJ  Z"), local: mustRoom(t, "N1ADJ")}
+	face, err := newInetFace(core, InetConfig{
+		Listen:  "127.0.0.1:0",
+		Modules: map[byte]ModuleConfig{'A': {Reflector: upstream.addr().String(), Module: 'C', Mode: ModeQTC}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { face.run(ctx); close(done) }()
+	t.Cleanup(func() { cancel(); <-done })
+	station := face.Addr()
+	gwCall, ht, w1aw := mustAddr(t, "N1ADJ  G"), mustAddr(t, "N1ADJ  H"), mustAddr(t, "W1AW")
+
+	gw := newUDPPeer(t)
+	gw.sendTo(t, station, connDatagram(gwCall, 'A'))
+	gw.expect(t, magicACKN)
+	gw.sendTo(t, station, smsDatagram(w1aw, ht, "hello"))
+	eventually(t, "radio heard", 2*time.Second, func() bool { return core.sentCount() == 1 })
+	gw.sendTo(t, station, controlDatagram(magicDISC, gwCall))
+	eventually(t, "session closed", 2*time.Second, func() bool {
+		face.mu.Lock()
+		defer face.mu.Unlock()
+		return len(face.sessions) == 0
+	})
+	if face.deliver(ht, mustMsg(t, w1aw, ht, 1, 60, 1, 0, "while down")) {
+		t.Error("delivered with no link")
+	}
+
+	// Another gateway linking does not take the radio.
+	other := newUDPPeer(t)
+	other.sendTo(t, station, connDatagram(mustAddr(t, "K1ABC  G"), 'A'))
+	other.expect(t, magicACKN)
+
+	// The same gateway relinks from a new port: the radio is back.
+	gw2 := newUDPPeer(t)
+	gw2.sendTo(t, station, connDatagram(gwCall, 'A'))
+	gw2.expect(t, magicACKN)
+	eventually(t, "relink reported", 2*time.Second, func() bool {
+		core.mu.Lock()
+		defer core.mu.Unlock()
+		return len(core.relinked) == 1 && core.relinked[0] == ht
+	})
+	if !face.deliver(ht, mustMsg(t, w1aw, ht, 1, 60, 2, 0, "after relink")) {
+		t.Fatal("not delivered after relink")
+	}
+	b, _ := gw2.expect(t, magicM17P)
+	if pf, err := parsePacketDatagram(b); err != nil || pf.dst != ht || string(pf.payload[1:]) != "after relink\x00" {
+		t.Errorf("relinked delivery %+v %v", pf, err)
+	}
+	other.expectNone(t, magicM17P, 200*time.Millisecond)
 }
 
 func TestLoadHostsFile(t *testing.T) {

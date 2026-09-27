@@ -197,7 +197,7 @@ Before removing qtcd, point the gateway back at your usual reflector, and remove
 
 **No `connected to bootstrap peer`.** qtcd can't reach `ham.n1adj.net` on TCP port 4001. Check the Pi's internet connection and any outgoing firewall. qtcd keeps retrying on its own.
 
-**A radio's messages aren't delivered.** qtcd sends to a radio only if it was heard (transmitted, by voice or SMS) through this hotspot within the last hour. Otherwise it holds messages until the radio is next heard, then sends the 10 most recent, oldest first, with a note saying how many older ones it left out. So a radio that has been listening quietly for over an hour gets its messages when it next keys up. `journalctl -u qtcd | grep -E "held|replay"` shows this happening. The hour is `[Delivery] ReachWindow`.
+**A radio's messages aren't delivered.** qtcd sends to a radio only if it was heard (transmitted, by voice or SMS) through this hotspot within the last hour. Otherwise it holds messages until the radio is next heard, then sends the 10 most recent, oldest first, with a note saying how many older ones it left out. So a radio that has been listening quietly for over an hour gets its messages when it next keys up. `journalctl -u qtcd | grep -E "holding|replay"` shows this happening. The hour is `[Delivery] ReachWindow`.
 
 **Reporting a problem.** Open an issue at [github.com/jancona/qtc/issues](https://github.com/jancona/qtc/issues) and include:
 

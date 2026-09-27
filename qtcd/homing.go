@@ -1,7 +1,6 @@
 package qtcd
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"sort"
@@ -66,6 +65,23 @@ func (r *Station) Heard(device envelope.Address, via Via, now uint32) error {
 		r.go_(func() { r.sweepSince(h, 0) })
 	}
 	return nil
+}
+
+// Relinked tells the station that devices' link to this node is back (a
+// gateway that restarted and relinked). Any with messages held for them get
+// a replay now, rather than when they are next heard.
+func (r *Station) Relinked(devices []envelope.Address) {
+	for _, d := range devices {
+		r.mu.Lock()
+		held := r.held[d]
+		delete(r.held, d)
+		h := r.homed[d.Base()]
+		r.mu.Unlock()
+		if held && h != nil {
+			r.log.Info("link back; replaying held messages", "device", d)
+			r.go_(func() { r.sweepSince(h, 0) })
+		}
+	}
 }
 
 // Homed reports the base callsigns this node currently homes.
@@ -169,6 +185,16 @@ func (r *Station) sweepSince(h *homed, from int64) bool {
 	r.watchMembers(h, members)
 
 	union := map[envelope.ID]*envelope.Envelope{}
+	// order is the union in the order first seen. A mailbox returns records
+	// in the order it received them, which is the only ordering for messages
+	// sent within one second (envelope timestamps are whole seconds).
+	var order []envelope.ID
+	add := func(id envelope.ID, e *envelope.Envelope) {
+		if _, ok := union[id]; !ok {
+			order = append(order, id)
+		}
+		union[id] = e
+	}
 	have := map[peer.ID]map[envelope.ID]bool{}
 	reached := 0
 	var failed []peer.ID
@@ -195,7 +221,7 @@ func (r *Station) sweepSince(h *homed, from int64) bool {
 		for _, e := range envs {
 			id2 := e.StoreID()
 			have[id][id2] = true
-			union[id2] = e
+			add(id2, e)
 		}
 	}
 	var local map[envelope.ID]bool
@@ -207,7 +233,7 @@ func (r *Station) sweepSince(h *homed, from int64) bool {
 			local = map[envelope.ID]bool{}
 			for _, rec := range recs {
 				local[rec.ID()] = true
-				union[rec.ID()] = rec.Env
+				add(rec.ID(), rec.Env)
 			}
 		}
 	}
@@ -254,7 +280,8 @@ func (r *Station) sweepSince(h *homed, from int64) bool {
 		}
 	}
 	var replay []*envelope.Envelope
-	for _, e := range union {
+	for _, sid := range order {
+		e := union[sid]
 		switch e.Type() {
 		case envelope.TypeROOM:
 			if err := r.subs.Apply(h.base, e); err != nil {
@@ -372,14 +399,19 @@ func (r *Station) reachable(device envelope.Address, now uint32) bool {
 // device is heard it gets a replay.
 func (r *Station) hold(d envelope.Address, e *envelope.Envelope) {
 	r.mu.Lock()
+	first := !r.held[d]
 	r.held[d] = true
 	r.mu.Unlock()
+	if first {
+		r.log.Info("holding messages for device", "device", d, "reachable", r.reachable(d, unixNow()))
+	}
 	r.log.Debug("held for device", "device", d, "envelope", e)
 }
 
 // replay delivers the messages a sweep found without a DELIVERED receipt
 // (node protocol §7.1): to each reachable local device, the ReplayLimit
-// most recent it has not had, oldest first. Older ones are recorded as
+// most recent it has not had, oldest first. msgs is in mailbox order, which
+// breaks ties between messages with the same timestamp. Older ones are recorded as
 // skipped so they never come back, and the device gets one notice saying
 // how many.
 func (r *Station) replay(msgs []*envelope.Envelope, now uint32) {
@@ -396,13 +428,7 @@ func (r *Station) replay(msgs []*envelope.Envelope, now uint32) {
 			r.hold(d, list[0])
 			continue
 		}
-		sort.Slice(list, func(i, j int) bool {
-			if ti, tj := list[i].Timestamp(), list[j].Timestamp(); ti != tj {
-				return ti < tj
-			}
-			a, b := list[i].ID(), list[j].ID()
-			return bytes.Compare(a[:], b[:]) < 0
-		})
+		sort.SliceStable(list, func(i, j int) bool { return list[i].Timestamp() < list[j].Timestamp() })
 		skipped := 0
 		if n := len(list) - r.cfg.ReplayLimit; n > 0 {
 			for _, e := range list[:n] {
