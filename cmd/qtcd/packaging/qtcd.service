@@ -3,6 +3,9 @@ Description=QTC messaging node
 Documentation=https://github.com/jancona/qtc
 After=network-online.target
 Wants=network-online.target
+# Start before the gateway that links to it, so its first CONN finds qtcd
+# listening (older m17-gateway releases never resend an unanswered CONN).
+Before=m17-gateway.service
 
 [Service]
 Type=simple
