@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -30,9 +31,11 @@ const (
 // ModuleConfig maps one of this node's modules to an upstream.
 type ModuleConfig struct {
 	// Reflector is an upstream reflector name from the hosts file, or a
-	// literal host:port.
+	// literal host:port. Empty makes the module messaging-only: it has no
+	// upstream, so voice and anything else not taken into QTC is dropped.
+	// A messaging-only module must be a qtc module.
 	Reflector string
-	// Module is the upstream module letter.
+	// Module is the upstream module letter; unused when Reflector is empty.
 	Module byte
 	Mode   ModuleMode
 }
@@ -41,9 +44,19 @@ type ModuleConfig struct {
 type InetConfig struct {
 	// Listen is the UDP address, e.g. "0.0.0.0:17000".
 	Listen string
-	// HostsFile resolves reflector names (M17Hosts.txt format). Optional if
-	// every module uses a literal host:port.
+	// HostsFile resolves reflector names (M17Hosts.txt format), re-read
+	// every HostsRefresh. Optional if every module uses a literal host:port.
 	HostsFile string
+	// HostsURL, used when HostsFile is empty, is where to download the hosts
+	// file from, at start and every HostsRefresh (DefaultHostsURL, say).
+	HostsURL string
+	// HostsCache saves the last good download, so a start without network
+	// still resolves names. Station sets it to DataDir/M17Hosts.txt.
+	HostsCache string
+	// HostsRefresh is how often names are resolved again; 0 means 24 h.
+	HostsRefresh time.Duration
+	// UserAgent is sent when downloading HostsURL.
+	UserAgent string
 	// Modules by letter.
 	Modules map[byte]ModuleConfig
 	// Gateways are address ranges whose clients are RF gateways (heard via
@@ -88,14 +101,14 @@ func (r *Station) inetDefaultTTL() uint16          { return r.cfg.DefaultTTL }
 func (r *Station) inetLog() *slog.Logger           { return r.log }
 
 type inetFace struct {
-	core     inetCore
-	cfg      InetConfig
-	log      *slog.Logger
-	conn     *net.UDPConn
-	upstream map[byte]*net.UDPAddr     // resolved per module
-	allow    map[envelope.Address]bool // base callsigns; nil allows all
+	core  inetCore
+	cfg   InetConfig
+	log   *slog.Logger
+	conn  *net.UDPConn
+	allow map[envelope.Address]bool // base callsigns; nil allows all
 
 	mu       sync.Mutex
+	upstream map[byte]*net.UDPAddr             // per module with a reflector; missing until resolved
 	sessions map[string]*inetSession           // by client address
 	devices  map[envelope.Address]*inetSession // device -> qtc-mode session that heard it
 	orphans  map[envelope.Address]orphan       // devices whose gateway link closed, until it relinks
@@ -112,7 +125,7 @@ type inetSession struct {
 	mod      ModuleConfig
 	qtcMode  bool
 	via      Via
-	up       *net.UDPConn
+	up       *net.UDPConn // nil on a messaging-only module
 
 	mu      sync.Mutex
 	last    time.Time
@@ -137,6 +150,9 @@ var (
 	maxConnRetryInterval = time.Minute
 	clientPingInterval   = 3 * time.Second
 	upstreamSilence      = 30 * time.Second
+	// hostsRetry is how soon names are resolved again after a failed
+	// download or an unresolved module, rather than waiting HostsRefresh.
+	hostsRetry = 15 * time.Minute
 )
 
 const heardRateLimit = 5 * time.Second
@@ -161,7 +177,9 @@ func newInetFace(core inetCore, cfg InetConfig) (*inetFace, error) {
 	if len(cfg.Modules) == 0 {
 		return nil, errors.New("qtcd: inet: no modules configured")
 	}
-	var hosts map[string]reflectorHost
+	if cfg.HostsRefresh == 0 {
+		cfg.HostsRefresh = 24 * time.Hour
+	}
 	f := &inetFace{
 		core:     core,
 		cfg:      cfg,
@@ -188,32 +206,42 @@ func newInetFace(core inetCore, cfg InetConfig) (*inetFace, error) {
 		if m.Mode != ModeNative && m.Mode != ModeQTC {
 			return nil, fmt.Errorf("qtcd: inet: module %c: mode must be native or qtc", letter)
 		}
+		if m.Reflector == "" {
+			if m.Mode != ModeQTC {
+				return nil, fmt.Errorf("qtcd: inet: module %c: a module with no reflector must be a qtc module", letter)
+			}
+			continue
+		}
 		if m.Module < 'A' || m.Module > 'Z' {
 			return nil, fmt.Errorf("qtcd: inet: module %c: upstream module %q is not A-Z", letter, m.Module)
 		}
-		addr := m.Reflector
-		if !strings.Contains(addr, ":") {
-			if hosts == nil {
-				if cfg.HostsFile == "" {
-					return nil, fmt.Errorf("qtcd: inet: module %c names reflector %q but no hosts file is configured", letter, m.Reflector)
-				}
-				var err error
-				if hosts, err = loadHostsFile(cfg.HostsFile); err != nil {
-					return nil, err
-				}
-			}
-			h, ok := hosts[strings.ToUpper(m.Reflector)]
-			if !ok {
-				return nil, fmt.Errorf("qtcd: inet: module %c: reflector %q not in %s", letter, m.Reflector, cfg.HostsFile)
-			}
-			addr = h.Addr
+		if !strings.Contains(m.Reflector, ":") && cfg.HostsFile == "" && cfg.HostsURL == "" {
+			return nil, fmt.Errorf("qtcd: inet: module %c names reflector %q but no hosts file or URL is configured", letter, m.Reflector)
 		}
-		ua, err := net.ResolveUDPAddr("udp", addr)
-		if err != nil {
-			return nil, fmt.Errorf("qtcd: inet: module %c: upstream %q: %w", letter, addr, err)
-		}
-		f.upstream[letter] = ua
 	}
+	// A name that does not resolve now is not fatal: its module refuses
+	// links until a refresh resolves it (run, refreshHosts).
+	var hosts map[string]reflectorHost
+	if f.needsHosts() {
+		var err error
+		switch {
+		case cfg.HostsFile != "":
+			hosts, err = loadHostsFile(cfg.HostsFile)
+		case cfg.HostsCache != "":
+			// The download happens in run; until then, the last one.
+			if hosts, err = loadHostsFile(cfg.HostsCache); errors.Is(err, os.ErrNotExist) {
+				err = nil
+			}
+		}
+		if err != nil {
+			f.log.Warn("hosts file", "err", err)
+		}
+	}
+	waiting := hosts == nil && cfg.HostsFile == "" && f.needsHosts()
+	if waiting {
+		f.log.Info("no hosts file yet; named reflectors resolve once it downloads", "url", cfg.HostsURL)
+	}
+	f.resolve(hosts, waiting)
 	la, err := net.ResolveUDPAddr("udp", cfg.Listen)
 	if err != nil {
 		return nil, fmt.Errorf("qtcd: inet: listen %q: %w", cfg.Listen, err)
@@ -233,6 +261,10 @@ func (f *inetFace) run(ctx context.Context) {
 	f.ctx, f.cancel = context.WithCancel(ctx)
 	f.wg.Add(1)
 	go f.reaper()
+	if f.hasUpstreams() {
+		f.wg.Add(1)
+		go f.refreshHosts()
+	}
 	go func() {
 		<-f.ctx.Done()
 		f.conn.Close()
@@ -369,11 +401,24 @@ func (f *inetFace) connect(b []byte, addr *net.UDPAddr) {
 		f.send(addr, controlDatagram(magicNACK, f.core.inetCallsign()))
 		return
 	}
-	up, err := net.DialUDP("udp", nil, f.upstream[module])
-	if err != nil {
-		f.log.Warn("upstream dial failed", "module", string(module), "upstream", f.upstream[module], "err", err)
-		f.send(addr, controlDatagram(magicNACK, f.core.inetCallsign()))
-		return
+	var up *net.UDPConn
+	var upAddr any = "none (messaging only)"
+	if mod.Reflector != "" {
+		f.mu.Lock()
+		ua := f.upstream[module]
+		f.mu.Unlock()
+		if ua == nil {
+			f.log.Warn("NACK: upstream reflector not resolved", "client", addr, "module", string(module), "reflector", mod.Reflector)
+			f.send(addr, controlDatagram(magicNACK, f.core.inetCallsign()))
+			return
+		}
+		var err error
+		if up, err = net.DialUDP("udp", nil, ua); err != nil {
+			f.log.Warn("upstream dial failed", "module", string(module), "upstream", ua, "err", err)
+			f.send(addr, controlDatagram(magicNACK, f.core.inetCallsign()))
+			return
+		}
+		upAddr = ua
 	}
 	s := &inetSession{
 		face:     f,
@@ -398,18 +443,26 @@ func (f *inetFace) connect(b []byte, addr *net.UDPAddr) {
 		f.log.Info("gateway relinked; radios reattached", "client", addr, "callsign", s.callsign, "devices", relinked)
 		f.core.inetRelinked(relinked)
 	}
-	f.log.Info("client linking", "client", addr, "callsign", s.callsign, "module", string(module),
-		"upstream", f.upstream[module], "upstream_module", string(mod.Module), "mode", mod.Mode)
+	if up != nil {
+		f.log.Info("client linking", "client", addr, "callsign", s.callsign, "module", string(module),
+			"upstream", upAddr, "upstream_module", string(mod.Module), "mode", mod.Mode)
+	} else {
+		f.log.Info("client linking", "client", addr, "callsign", s.callsign, "module", string(module),
+			"upstream", upAddr, "mode", mod.Mode)
+	}
 	// The client is linked to this node, not to the upstream: answer it now
 	// and manage the upstream link in the background.
 	f.send(addr, controlDatagram(magicACKN, f.core.inetCallsign()))
-	req := append([]byte(nil), b...)
-	req[10] = mod.Module
-	s.connReq = req
-	s.forwardUp(req)
-	f.wg.Add(3)
-	go s.readUpstream()
-	go s.retryConn()
+	if up != nil {
+		req := append([]byte(nil), b...)
+		req[10] = mod.Module
+		s.connReq = req
+		s.forwardUp(req)
+		f.wg.Add(2)
+		go s.readUpstream()
+		go s.retryConn()
+	}
+	f.wg.Add(1)
 	go s.pingClient()
 	s.keepHeard()
 }
@@ -458,7 +511,7 @@ func (s *inetSession) retryConn() {
 			s.acked = false
 			s.connGap = 0
 			s.nextCon = now
-			s.face.log.Warn("upstream silent; relinking", "client", s.client, "upstream", s.face.upstream[s.module])
+			s.face.log.Warn("upstream silent; relinking", "client", s.client, "upstream", s.up.RemoteAddr())
 		}
 		due := !s.acked && !now.Before(s.nextCon)
 		if due {
@@ -473,7 +526,7 @@ func (s *inetSession) retryConn() {
 		if !due {
 			continue
 		}
-		s.face.log.Debug("resending upstream CONN", "client", s.client, "upstream", s.face.upstream[s.module])
+		s.face.log.Debug("resending upstream CONN", "client", s.client, "upstream", s.up.RemoteAddr())
 		s.forwardUp(s.connReq)
 	}
 }
@@ -509,7 +562,12 @@ func (s *inetSession) keepHeard() {
 	}
 }
 
+// forwardUp sends to the upstream reflector; on a messaging-only module
+// there is none, and the datagram is dropped.
 func (s *inetSession) forwardUp(b []byte) {
+	if s.up == nil {
+		return
+	}
 	if _, err := s.up.Write(b); err != nil {
 		s.face.log.Debug("upstream write", "client", s.client, "err", err)
 	}
@@ -528,7 +586,9 @@ func (s *inetSession) close(disc bool) {
 	if disc {
 		s.forwardUp(controlDatagram(magicDISC, s.callsign))
 	}
-	s.up.Close()
+	if s.up != nil {
+		s.up.Close()
+	}
 	if s.face.sessions[s.client.String()] == s {
 		delete(s.face.sessions, s.client.String())
 	}

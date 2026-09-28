@@ -120,6 +120,46 @@ func TestConfigNoInet(t *testing.T) {
 	}
 }
 
+// TestConfigMessagingOnly: an [Inet] section alone gives one messaging-only
+// module, A; a module with neither Reflector nor Module is messaging-only;
+// Mode defaults to qtc; with no HostsFile, names come from the M17
+// Project's list.
+func TestConfigMessagingOnly(t *testing.T) {
+	fc, err := loadConfig(writeConfig(t, "[General]\nCallsign=N1ADJ  P\n[Inet]\nAllowCallsigns=W1AW\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := fc.Inet
+	if in == nil || len(in.Modules) != 1 || in.Modules['A'] != (qtcd.ModuleConfig{Mode: qtcd.ModeQTC}) {
+		t.Fatalf("Inet = %+v", in)
+	}
+	if in.HostsURL != qtcd.DefaultHostsURL || in.HostsFile != "" || in.HostsRefresh != 0 {
+		t.Errorf("hosts: file %q url %q refresh %v", in.HostsFile, in.HostsURL, in.HostsRefresh)
+	}
+
+	fc, err = loadConfig(writeConfig(t, `
+[General]
+Callsign = N1ADJ  P
+[Inet]
+HostsFile = /opt/m17/M17Hosts.txt
+HostsRefresh = 6h
+[Module A]
+[Module B]
+Reflector = M17-M17
+Module = C
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	in = fc.Inet
+	if in.Modules['A'] != (qtcd.ModuleConfig{Mode: qtcd.ModeQTC}) || in.Modules['B'] != (qtcd.ModuleConfig{Reflector: "M17-M17", Module: 'C', Mode: qtcd.ModeQTC}) {
+		t.Errorf("Modules = %+v", in.Modules)
+	}
+	if in.HostsURL != "" || in.HostsRefresh != 6*time.Hour {
+		t.Errorf("hosts: url %q refresh %v", in.HostsURL, in.HostsRefresh)
+	}
+}
+
 func TestConfigErrors(t *testing.T) {
 	for _, tc := range []struct {
 		name, ini, want string
@@ -134,11 +174,13 @@ func TestConfigErrors(t *testing.T) {
 		{"reach", "[General]\nCallsign=N1ADJ  P\n[Delivery]\nReachWindow=an hour\n", "[Delivery] ReachWindow: \"an hour\" is not a duration"},
 		{"cap", "[General]\nCallsign=N1ADJ  P\n[Network]\nCaps=public,mailbx\n", "unknown capability \"mailbx\""},
 		{"cidr", "[General]\nCallsign=N1ADJ  P\n[Inet]\nGateways=10.0.0.0\n[Module A]\nReflector=M17-M17\nModule=C\nMode=qtc\n", "Gateways: \"10.0.0.0\" is not a CIDR"},
-		{"inet without module", "[General]\nCallsign=N1ADJ  P\n[Inet]\n", "needs at least one [Module X]"},
+		{"hosts both", "[General]\nCallsign=N1ADJ  P\n[Inet]\nHostsFile=/x\nHostsURL=https://example.net/h.txt\n", "set HostsFile or HostsURL, not both"},
+		{"hosts refresh", "[General]\nCallsign=N1ADJ  P\n[Inet]\nHostsRefresh=daily\n", "[Inet] HostsRefresh: \"daily\" is not a duration"},
 		{"module name", "[General]\nCallsign=N1ADJ  P\n[Module AB]\n", "module sections are named [Module A]"},
 		{"module letter", "[General]\nCallsign=N1ADJ  P\n[Module A]\nReflector=M17-M17\nModule=CC\nMode=qtc\n", "[Module A] Module must be one letter"},
 		{"mode", "[General]\nCallsign=N1ADJ  P\n[Module A]\nReflector=M17-M17\nModule=C\nMode=proxy\n", "[Module A] Mode must be qtc or native"},
-		{"reflector", "[General]\nCallsign=N1ADJ  P\n[Module A]\nModule=C\nMode=qtc\n", "[Module A] Reflector is required"},
+		{"reflector", "[General]\nCallsign=N1ADJ  P\n[Module A]\nModule=C\nMode=qtc\n", "[Module A] Module needs a Reflector"},
+		{"native no reflector", "[General]\nCallsign=N1ADJ  P\n[Module A]\nMode=native\n", "[Module A] a native module needs a Reflector"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := writeConfig(t, tc.ini)

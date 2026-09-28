@@ -22,16 +22,17 @@ import (
 //	[Timers]   PresenceInterval, SweepInterval, RecordRefresh,
 //	           TakeoverPeriod, MemberFailSilence, MemberFailSweeps
 //	[Delivery] ReachWindow, ReplayLimit
-//	[Inet]     Listen, HostsFile, Gateways, AllowCallsigns
+//	[Inet]     Listen, HostsFile, HostsURL, HostsRefresh, Gateways, AllowCallsigns
 //	[Module X] Reflector, Module, Mode   (one per module letter X)
 //
 // The client face runs when there is an [Inet] section or any [Module X].
+// An [Inet] section with no [Module X] has one messaging-only module, A.
 var configKeys = map[string][]string{
 	"general":  {"callsign", "datadir", "keyfile", "admin", "software", "metricsinterval", "devices", "rooms", "echoroommessages"},
 	"network":  {"listen", "bootstrap", "caps", "dht", "mailboxmembers", "k"},
 	"timers":   {"presenceinterval", "sweepinterval", "recordrefresh", "takeoverperiod", "memberfailsilence", "memberfailsweeps"},
 	"delivery": {"reachwindow", "replaylimit"},
-	"inet":     {"listen", "hostsfile", "gateways", "allowcallsigns"},
+	"inet":     {"listen", "hostsfile", "hostsurl", "hostsrefresh", "gateways", "allowcallsigns"},
 	"module":   {"reflector", "module", "mode"},
 }
 
@@ -66,6 +67,8 @@ func parseConfig(f *ini.File) (fileConfig, error) {
 	fail := func(format string, a ...any) { errs = append(errs, fmt.Sprintf(format, a...)) }
 
 	gen, nw, tm, dl := f.Section("general"), f.Section("network"), f.Section("timers"), f.Section("delivery")
+	hasInet := f.HasSection("inet") // before f.Section("inet") creates it
+	var inetRefresh time.Duration
 	fc := fileConfig{Admin: str(gen, "admin")}
 	cfg := &fc.Config
 	cfg.Callsign = str(gen, "callsign")
@@ -121,6 +124,7 @@ func parseConfig(f *ini.File) (fileConfig, error) {
 		{tm, "takeoverperiod", &cfg.TakeoverPeriod},
 		{tm, "memberfailsilence", &cfg.MemberFailSilence},
 		{dl, "reachwindow", &cfg.ReachWindow},
+		{f.Section("inet"), "hostsrefresh", &inetRefresh},
 	} {
 		if s := str(d.sec, d.key); s != "" {
 			v, err := time.ParseDuration(s)
@@ -135,16 +139,27 @@ func parseConfig(f *ini.File) (fileConfig, error) {
 	cfg.ReplayLimit = integer(dl, "replaylimit", fail)
 
 	modules := moduleSections(f)
-	if f.HasSection("inet") || len(modules) > 0 {
+	if hasInet || len(modules) > 0 {
 		in := f.Section("inet")
 		ic := &qtcd.InetConfig{
 			Listen:         str(in, "listen"),
 			HostsFile:      str(in, "hostsfile"),
+			HostsURL:       str(in, "hostsurl"),
+			HostsRefresh:   inetRefresh,
 			AllowCallsigns: list(in, "allowcallsigns"),
 			Modules:        map[byte]qtcd.ModuleConfig{},
 		}
 		if ic.Listen == "" {
 			ic.Listen = "0.0.0.0:17000"
+		}
+		switch {
+		case ic.HostsFile != "" && ic.HostsURL != "":
+			fail("[Inet] set HostsFile or HostsURL, not both")
+		case ic.HostsFile == "" && ic.HostsURL == "":
+			ic.HostsURL = qtcd.DefaultHostsURL
+		}
+		if inetRefresh < 0 {
+			fail("[Inet] HostsRefresh must be positive")
 		}
 		for _, c := range list(in, "gateways") {
 			_, n, err := net.ParseCIDR(c)
@@ -155,19 +170,26 @@ func parseConfig(f *ini.File) (fileConfig, error) {
 			ic.Gateways = append(ic.Gateways, n)
 		}
 		if len(modules) == 0 {
-			fail("[Inet] needs at least one [Module X] section")
+			ic.Modules['A'] = qtcd.ModuleConfig{Mode: qtcd.ModeQTC} // messaging only
 		}
 		for letter, sec := range modules {
 			m := strings.ToUpper(str(sec, "module"))
 			mode := strings.ToLower(str(sec, "mode"))
+			if mode == "" {
+				mode = string(qtcd.ModeQTC)
+			}
 			reflector := str(sec, "reflector")
 			switch {
-			case reflector == "":
-				fail("[%s] Reflector is required", title(sec))
-			case len(m) != 1 || m[0] < 'A' || m[0] > 'Z':
-				fail("[%s] Module must be one letter A-Z", title(sec))
 			case mode != string(qtcd.ModeQTC) && mode != string(qtcd.ModeNative):
 				fail("[%s] Mode must be qtc or native", title(sec))
+			case reflector == "" && m != "":
+				fail("[%s] Module needs a Reflector; leave both out for a messaging-only module", title(sec))
+			case reflector == "" && mode == string(qtcd.ModeNative):
+				fail("[%s] a native module needs a Reflector", title(sec))
+			case reflector == "":
+				ic.Modules[letter] = qtcd.ModuleConfig{Mode: qtcd.ModeQTC}
+			case len(m) != 1 || m[0] < 'A' || m[0] > 'Z':
+				fail("[%s] Module must be one letter A-Z", title(sec))
 			default:
 				ic.Modules[letter] = qtcd.ModuleConfig{Reflector: reflector, Module: m[0], Mode: qtcd.ModuleMode(mode)}
 			}
@@ -289,7 +311,7 @@ var keyNames = map[string]string{}
 func init() {
 	for _, k := range []string{"Callsign", "DataDir", "KeyFile", "Admin", "Software", "MetricsInterval", "Devices", "Rooms", "EchoRoomMessages",
 		"Listen", "Bootstrap", "Caps", "DHT", "MailboxMembers", "K", "PresenceInterval", "SweepInterval", "RecordRefresh",
-		"TakeoverPeriod", "MemberFailSilence", "MemberFailSweeps", "ReachWindow", "ReplayLimit", "HostsFile", "Gateways", "AllowCallsigns", "Reflector", "Module", "Mode"} {
+		"TakeoverPeriod", "MemberFailSilence", "MemberFailSweeps", "ReachWindow", "ReplayLimit", "HostsFile", "HostsURL", "HostsRefresh", "Gateways", "AllowCallsigns", "Reflector", "Module", "Mode"} {
 		keyNames[strings.ToLower(k)] = k
 	}
 }

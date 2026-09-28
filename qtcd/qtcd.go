@@ -269,7 +269,14 @@ func (r *Station) Start(ctx context.Context) error {
 	r.go_(r.rooms.run)
 	r.go_(r.dialer.run)
 	if r.cfg.Inet != nil {
-		face, err := newInetFace(r, *r.cfg.Inet)
+		ic := *r.cfg.Inet
+		if ic.HostsCache == "" && r.cfg.DataDir != "" {
+			ic.HostsCache = filepath.Join(r.cfg.DataDir, "M17Hosts.txt")
+		}
+		if ic.UserAgent == "" {
+			ic.UserAgent = r.cfg.Software
+		}
+		face, err := newInetFace(r, ic)
 		if err != nil {
 			r.cancel()
 			return err
