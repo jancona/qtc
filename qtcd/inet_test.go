@@ -78,9 +78,12 @@ type udpPeer struct {
 	from chan *net.UDPAddr
 }
 
-func newUDPPeer(t *testing.T) *udpPeer {
+func newUDPPeer(t *testing.T) *udpPeer { t.Helper(); return newUDPPeerAt(t, 0) }
+
+// newUDPPeerAt listens on a given loopback port; 0 picks one.
+func newUDPPeerAt(t *testing.T, port int) *udpPeer {
 	t.Helper()
-	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -545,6 +548,77 @@ func TestGatewayRelinkKeepsRadios(t *testing.T) {
 		t.Errorf("relinked delivery %+v %v", pf, err)
 	}
 	other.expectNone(t, magicM17P, 200*time.Millisecond)
+}
+
+// TestUpstreamSurvivesReadError: when the reflector goes away, CONN
+// resends bounce and the upstream socket reports a read error. The session
+// must keep reading, so that when the reflector returns it relinks and
+// answers the reflector's PINGs, and it must back off its resends meanwhile.
+func TestUpstreamSurvivesReadError(t *testing.T) {
+	oldRetry, oldMax, oldSilence, oldPing := connRetryInterval, maxConnRetryInterval, upstreamSilence, clientPingInterval
+	connRetryInterval, maxConnRetryInterval, upstreamSilence, clientPingInterval = 50*time.Millisecond, 400*time.Millisecond, 300*time.Millisecond, 100*time.Millisecond
+	t.Cleanup(func() {
+		connRetryInterval, maxConnRetryInterval, upstreamSilence, clientPingInterval = oldRetry, oldMax, oldSilence, oldPing
+	})
+
+	upstream := newUDPPeer(t)
+	port := upstream.addr().Port
+	core := &stubCore{node: mustAddr(t, "N1ADJ  Z"), local: mustRoom(t, "N1ADJ")}
+	face, err := newInetFace(core, InetConfig{
+		Listen:  "127.0.0.1:0",
+		Modules: map[byte]ModuleConfig{'A': {Reflector: upstream.addr().String(), Module: 'C', Mode: ModeQTC}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { face.run(ctx); close(done) }()
+	t.Cleanup(func() { cancel(); <-done })
+
+	gw := newUDPPeer(t)
+	gw.sendTo(t, face.Addr(), connDatagram(mustAddr(t, "N1ADJ  G"), 'A'))
+	gw.expect(t, magicACKN)
+	_, upFrom := upstream.expect(t, magicCONN)
+	upstream.sendTo(t, upFrom, controlDatagram(magicACKN, 0))
+	upstream.expectNone(t, magicCONN, 150*time.Millisecond)
+
+	// The reflector goes away. Keep the gateway's own link alive meanwhile.
+	upstream.conn.Close()
+	stopPong := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-stopPong:
+				return
+			case <-time.After(50 * time.Millisecond):
+				gw.conn.WriteToUDP(controlDatagram(magicPONG, mustAddr(t, "N1ADJ  G")), face.Addr())
+			}
+		}
+	}()
+	defer close(stopPong)
+	time.Sleep(1500 * time.Millisecond) // silence, relinking, bounced CONNs
+
+	// It comes back on the same port: resent CONNs arrive, backed off.
+	back := newUDPPeerAt(t, port)
+	var conns []time.Time
+	var from *net.UDPAddr
+	for len(conns) < 3 {
+		_, from = back.expect(t, magicCONN)
+		conns = append(conns, time.Now())
+	}
+	if gap := conns[2].Sub(conns[1]); gap < 300*time.Millisecond {
+		t.Errorf("CONN resent %v apart; want backed off toward %v", gap, maxConnRetryInterval)
+	}
+	back.sendTo(t, from, controlDatagram(magicACKN, 0))
+	back.sendTo(t, from, controlDatagram(magicPING, 0))
+	back.expect(t, magicPONG) // the reader is alive
+
+	// Linked again: while the reflector keeps PINGing, no more CONNs.
+	for i := 0; i < 5; i++ {
+		back.sendTo(t, from, controlDatagram(magicPING, 0))
+		back.expectNone(t, magicCONN, 100*time.Millisecond)
+	}
 }
 
 func TestLoadHostsFile(t *testing.T) {

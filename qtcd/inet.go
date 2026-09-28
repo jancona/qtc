@@ -118,19 +118,25 @@ type inetSession struct {
 	last    time.Time
 	heardAt map[envelope.Address]time.Time
 	closed  bool
-	acked   bool      // upstream answered our CONN
-	lastUp  time.Time // last PING or PONG from upstream
-	connReq []byte    // the CONN/LSTN as sent upstream, resent until acked
+	acked   bool          // upstream answered our CONN
+	lastUp  time.Time     // last PING or PONG from upstream
+	connReq []byte        // the CONN/LSTN as sent upstream, resent until acked
+	connGap time.Duration // wait before the next unanswered CONN; grows to maxConnRetryInterval
+	nextCon time.Time     // when the next CONN may be resent
 
 	lastKeepHeard time.Time // internet clients: when keepHeard last heard the callsign
 }
 
 // Link keepalive timing. The node PINGs its client like any reflector, and
 // relinks upstream when the reflector has been silent for upstreamSilence.
+// An unanswered upstream CONN is resent after connRetryInterval, doubling
+// each time up to maxConnRetryInterval, so a reflector that is down or
+// not answering is not sent a CONN every few seconds indefinitely.
 var (
-	connRetryInterval  = 5 * time.Second
-	clientPingInterval = 3 * time.Second
-	upstreamSilence    = 30 * time.Second
+	connRetryInterval    = 5 * time.Second
+	maxConnRetryInterval = time.Minute
+	clientPingInterval   = 3 * time.Second
+	upstreamSilence      = 30 * time.Second
 )
 
 const heardRateLimit = 5 * time.Second
@@ -235,10 +241,14 @@ func (f *inetFace) run(ctx context.Context) {
 	for {
 		n, addr, err := f.conn.ReadFromUDP(buf)
 		if err != nil {
-			if f.ctx.Err() == nil {
-				f.log.Warn("inet read", "err", err)
+			if f.ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
+				break
 			}
-			break
+			// Keep serving: a transient error must not take the face down
+			// for every gateway and client.
+			f.log.Warn("inet read", "err", err)
+			time.Sleep(100 * time.Millisecond)
+			continue
 		}
 		f.handleClient(append([]byte(nil), buf[:n]...), addr)
 	}
@@ -443,13 +453,24 @@ func (s *inetSession) retryConn() {
 			s.mu.Unlock()
 			return
 		}
-		if s.acked && time.Since(s.lastUp) > upstreamSilence {
+		now := time.Now()
+		if s.acked && now.Sub(s.lastUp) > upstreamSilence {
 			s.acked = false
+			s.connGap = 0
+			s.nextCon = now
 			s.face.log.Warn("upstream silent; relinking", "client", s.client, "upstream", s.face.upstream[s.module])
 		}
-		acked := s.acked
+		due := !s.acked && !now.Before(s.nextCon)
+		if due {
+			if s.connGap == 0 {
+				s.connGap = connRetryInterval
+			} else {
+				s.connGap = min(2*s.connGap, maxConnRetryInterval)
+			}
+			s.nextCon = now.Add(s.connGap)
+		}
 		s.mu.Unlock()
-		if acked {
+		if !due {
 			continue
 		}
 		s.face.log.Debug("resending upstream CONN", "client", s.client, "upstream", s.face.upstream[s.module])
@@ -751,7 +772,19 @@ func (s *inetSession) readUpstream() {
 	for {
 		n, err := s.up.Read(buf)
 		if err != nil {
-			return
+			s.mu.Lock()
+			closed := s.closed
+			s.mu.Unlock()
+			if closed || errors.Is(err, net.ErrClosed) {
+				return
+			}
+			// A UDP socket reports an ICMP error (the reflector restarting,
+			// a network blip) as a failed read. Keep reading: returning here
+			// would leave the session deaf to the reflector's ACKN and PINGs
+			// while retryConn kept sending CONN.
+			s.face.log.Debug("upstream read error; still reading", "client", s.client, "err", err)
+			time.Sleep(100 * time.Millisecond)
+			continue
 		}
 		b := buf[:n]
 		if len(b) < 4 {
@@ -779,6 +812,7 @@ func (s *inetSession) readUpstream() {
 			first := !s.acked
 			s.acked = true
 			s.lastUp = time.Now()
+			s.connGap = 0
 			s.mu.Unlock()
 			if first {
 				s.face.log.Info("upstream linked", "client", s.client, "upstream", s.up.RemoteAddr())
