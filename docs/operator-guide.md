@@ -163,7 +163,7 @@ Settings you might change:
 |---|---|
 | `[Module A] Reflector`, `Module` | To send voice to a different reflector or module. `Reflector` is a name from the hosts file, or `host:port`. Leave both out for a messaging-only module, with no voice. |
 | `[General] Callsign` | Only if the generated one is wrong. Each node needs its own callsign, distinct from your radios'. Pad the base callsign to eight characters and put the module letter ninth. |
-| `[Inet] HostsFile` | If your `M17Hosts.txt` is somewhere other than the dashboard's location. qtcd reads it again daily (`[Inet] HostsRefresh`). Without `HostsFile`, qtcd downloads the M17 Project's list daily instead. |
+| `[Inet] HostsFile` | If your `M17Hosts.txt` is somewhere other than the dashboard's location. It must be readable by the `qtcd` user, which can't see anything under `/home`. qtcd reads it again daily (`[Inet] HostsRefresh`). Without `HostsFile`, qtcd downloads the M17 Project's list daily instead. |
 | `[Module B]` and so on | To offer more modules. `Mode=native` makes a plain pass-through where SMS goes upstream too. |
 
 [`config.example.ini`](../cmd/qtcd/config.example.ini) describes every setting and its default. Sections and setting names aren't case-sensitive, and lists are comma-separated.
@@ -244,7 +244,7 @@ The same SDR can measure a radio: transmit analog FM with no audio, and read the
 
 **The gateway doesn't link to M17-QTC.** Check that `OverrideHosts.txt` has `M17-QTC 127.0.0.1 17000` and the gateway config says `M17-QTC`, module `A`. Look for `client linking` in `journalctl -u qtcd`. If it's missing, the gateway isn't reaching qtcd; `journalctl -u m17-gateway` shows why.
 
-**The gateway links but voice doesn't reach the reflector.** Look for `upstream linked`. If it never appears, or qtcd logs `upstream silent; relinking`, check that `[Module A] Reflector` is spelled as it appears in `M17Hosts.txt`, and that the reflector is up. `reflector not found in hosts file` means the name isn't in the list; until it is, qtcd refuses links to that module, and it checks again every 15 minutes.
+**The gateway links but voice doesn't reach the reflector.** Look for `upstream linked`. If it never appears, or qtcd logs `upstream silent; relinking`, check that `[Module A] Reflector` is spelled as it appears in `M17Hosts.txt`, and that the reflector is up. `reflector not found in hosts file` means the name isn't in the list, and `no hosts file loaded` means qtcd couldn't read or download the list (the warning before it says why). Until the name resolves, qtcd refuses links to that module, and it checks again every 15 minutes.
 
 **qtcd won't start.** Run `journalctl -u qtcd -n 20`. A config error names the setting. `address already in use` on port 17000 means something else on the Pi is listening there. `bind: address already in use` on 8017 means another program is using the admin port; change `[General] Admin`.
 

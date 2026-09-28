@@ -168,8 +168,11 @@ func (f *inetFace) resolve(hosts map[string]reflectorHost, quiet bool) bool {
 				if quiet {
 					continue
 				}
-				f.log.Warn("reflector not found in hosts file; module refuses links until it is",
-					"module", string(letter), "reflector", m.Reflector, "hosts", len(hosts))
+				msg := "reflector not found in hosts file; module refuses links until it is"
+				if hosts == nil {
+					msg = "no hosts file loaded; module refuses links until one is"
+				}
+				f.log.Warn(msg, "module", string(letter), "reflector", m.Reflector)
 				continue
 			}
 			addr = h.Addr
