@@ -30,14 +30,16 @@ Reasoning is in the docs. Do not "simplify" these away.
 ```
 envelope/   QTC packet kinds (MSG/RCPT/ROOM/SYNC/ACK): parsing, IDs, signatures, addresses and room name encoding. stdlib only.
 store/      JSON Lines put/query/watch protocol, client and server. stdlib + envelope.
+client/     device side of the native client protocol (acks, retries, sync, summaries/FETCH) and the typed-line Terminal; transport-free. stdlib + envelope.
 qtcd/       the daemon as a library, one flat package: subscriptions, M17_inet proxy side, libp2p side, homing, sweeps, home station.
-cmd/qtcd/   daemon binary: config, flags, signals, wiring.   cmd/qtc/  CLI (decode, keys, fixtures, store client).
-cmd/qtcd/packaging/  .deb for qtcd + qtc (systemd unit, maintainer scripts, sample config); scripts/build-deb.sh VERSION ARCH. CI (.github/workflows/qtc.yml) releases it on v* tags.
+cmd/qtcd/   daemon binary: config, flags, signals, wiring.   cmd/qtc/  CLI (chat, decode, keys, fixtures, store client).
+cmd/qtc-radio/  Linux-only test radio: a hotspot modem (m17/modem) running client/ over RF. Only it imports m17/modem.
+cmd/qtcd/packaging/  .deb for qtcd, qtc and qtc-radio (systemd unit, maintainer scripts, sample config); scripts/build-deb.sh VERSION ARCH. CI (.github/workflows/qtc.yml) releases it on v* tags.
 app/        GUI client (Fyne, desktop and Android). Its own Go module, listed in go.work.
 docs/       specs and fixtures.
 ```
 
-`app/` is a separate module so Fyne never enters the daemon's or CLI's dependency graph. It may import `envelope`, `store` and `github.com/jancona/m17`; nothing in the main module imports it. Release builds run with `GOWORK=off` against the tagged `m17` in `go.mod`, so any `m17` change a release needs must be tagged first.
+`app/` is a separate module so Fyne never enters the daemon's or CLI's dependency graph. It may import `envelope`, `store` and `github.com/jancona/m17`; nothing in the main module imports it. Release builds run with `GOWORK=off` against the tagged `m17` in `go.mod`, so any `m17` change a release needs must be tagged first. `go.mod` repeats m17's `replace` for `github.com/yobert/alsa` (replaces don't propagate); keep them in step. Don't run `go work sync`: it rewrites m17's go.mod.
 
 Imports go one way: `envelope` → `store` → `station` → `cmd`. Few packages on purpose: a new package needs a consumer that must not import what it would otherwise pull in (the CLI must not link libp2p, which is why `store` is separate). Split by file, not by package, until then. Anything that wants to import the other way is a design problem, not a packaging one.
 

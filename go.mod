@@ -3,7 +3,7 @@ module github.com/jancona/qtc
 go 1.26.2
 
 require (
-	github.com/jancona/m17 v0.6.0
+	github.com/jancona/m17 v0.6.3
 	github.com/libp2p/go-libp2p v0.49.0
 	github.com/libp2p/go-libp2p-kad-dht v0.42.2
 	github.com/libp2p/go-libp2p-pubsub v0.17.0
@@ -17,6 +17,7 @@ require (
 	github.com/benbjohnson/clock v1.3.5 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/creack/goselect v0.1.2 // indirect
 	github.com/davidlazar/go-crypto v0.0.0-20200604182044-b73af7476f6c // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1 // indirect
 	github.com/dunglas/httpsfv v1.1.0 // indirect
@@ -24,6 +25,8 @@ require (
 	github.com/flynn/noise v1.1.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
+	github.com/go-zeromq/goczmq/v4 v4.2.2 // indirect
+	github.com/go-zeromq/zmq4 v0.17.0 // indirect
 	github.com/google/gopacket v1.1.19 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
@@ -93,8 +96,11 @@ require (
 	github.com/quic-go/quic-go v0.60.0 // indirect
 	github.com/quic-go/webtransport-go v0.11.1 // indirect
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
+	github.com/warthog618/go-gpiocdev v0.9.1 // indirect
 	github.com/whyrusleeping/go-keyspace v0.0.0-20160322163242-5b898ac5add1 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
+	github.com/yobert/alsa v0.0.0-20230126204319-85bb7ee02e5b // indirect
+	go.bug.st/serial v1.6.2 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel v1.44.0 // indirect
 	go.opentelemetry.io/otel/metric v1.44.0 // indirect
@@ -118,3 +124,6 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 	lukechampine.com/blake3 v1.4.1 // indirect
 )
+
+// Same as github.com/jancona/m17: its modem package needs the fork.
+replace github.com/yobert/alsa => github.com/jancona/alsa v0.0.0-20260224125037-816157b04153

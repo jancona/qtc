@@ -133,6 +133,19 @@ grep -oE '"smsMessage":"<label> [0-9]+/30' dashboard.log | sort -u | wc -l
 
 Before a burst, unlink the reference receiver from any shared reflector (or put it on an unused module): m17-gateway forwards every SMS it receives over RF. Calibrate the hotspots first (operator guide, "Getting your hotspot on frequency"); an MMDVM receiver without AFC decodes nothing from a transmitter 400 Hz off.
 
+## Native radio tests
+
+`qtc-radio` (in the `.deb`) turns a spare hotspot into a native QTC radio, for testing what only happens over RF: acknowledgements and retries through a gateway, sync pages, and room summaries with FETCH (docs/qtc-client.md). It reads the modem and frequency settings from an m17-gateway config, so stop m17-gateway on that box first and point it at the channel of the hotspot under test:
+
+```
+sudo systemctl stop m17-gateway
+qtc-radio -config /etc/m17-gateway.ini -callsign "N1ADJ 7"
+```
+
+It takes the same typed lines as `qtc chat` (`@CALL text`, `#ROOM text`, `/join`, `/rooms`, `/sync`), and syncs and asks for its room list when it starts. Lines can be piped in to script a test; it keeps listening after the input ends, until interrupted. On exit it logs how many packets it received, dropped, and transmitted. `-drop 0.2` discards a fifth of received QTC packets to exercise retries and FETCH without a bad signal; `-log-level debug` logs every packet. Two boxes running it with different callsigns are two radios, for testing FETCH suppression and acknowledgement collisions.
+
+A modem is not a handheld: its loss rate and turnaround differ from a radio's, so this tests the protocol and its timers, not what radios will see.
+
 ## Teardown
 
 Restore the gateway (`sudo cp /etc/m17-gateway.ini.pre-qtc /etc/m17-gateway.ini`, delete the `M17-QTC` line, restart), then `pkill -x qtcd` on the test stations. The public station can stay up.

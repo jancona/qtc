@@ -108,8 +108,8 @@ func controlWith(magic string, a envelope.Address) []byte {
 	return append([]byte(magic), b[:]...)
 }
 
-// qtcPacket frames a QTC payload from the node side.
-func qtcPacket(t *testing.T, dst, src envelope.Address, e *envelope.Envelope) []byte {
+// nodePacket frames a QTC payload from the node side.
+func nodePacket(t *testing.T, dst, src envelope.Address, e *envelope.Envelope) []byte {
 	t.Helper()
 	lsf, err := m17.NewLSF("N1ADJ", "N1ADJ", m17.LSFTypePacket, m17.LSFDataTypeData, 0)
 	if err != nil {
@@ -191,7 +191,7 @@ func TestChat(t *testing.T) {
 			t.Fatalf("sent %s", e)
 		}
 		ack, _ := envelope.BuildAck([]envelope.ID{e.ID()})
-		node.send(t, qtcPacket(t, me, nodeCall, ack))
+		node.send(t, nodePacket(t, me, nodeCall, ack))
 		return e
 	}
 
@@ -212,9 +212,9 @@ func TestChat(t *testing.T) {
 		t.Fatalf("sync request %s to %s", e, dst)
 	}
 	page, _ := envelope.BuildSync(envelope.SyncPage, 0, 500, 1, 1, 0)
-	node.send(t, qtcPacket(t, me, nodeCall, page))
+	node.send(t, nodePacket(t, me, nodeCall, page))
 	missed, _ := envelope.BuildMsg(w1aw, me, uint32(time.Now().Unix()), 60, 1, envelope.FlagRcptReq, "while you were away")
-	node.send(t, qtcPacket(t, me, w1aw, missed))
+	node.send(t, nodePacket(t, me, w1aw, missed))
 	waitOutput(t, out, " W1AW: while you were away")
 	if _, e := node.expectKind(t, envelope.KindRCPT); e.Source() != me || e.Destination() != w1aw {
 		t.Errorf("acknowledged with %s", e)
@@ -260,12 +260,12 @@ func TestChat(t *testing.T) {
 		t.Errorf("join %s to %s", e, dst)
 	}
 	ok, _ := envelope.BuildRoom(envelope.OpOK, 1, nil, "")
-	node.send(t, qtcPacket(t, me, nodeCall, ok))
+	node.send(t, nodePacket(t, me, nodeCall, ok))
 	waitOutput(t, out, "* joined")
 	type_("/rooms")
 	node.expectKind(t, envelope.KindROOM)
 	list, _ := envelope.BuildRoom(envelope.OpOK, 1, []envelope.Address{maine, net}, "")
-	node.send(t, qtcPacket(t, me, nodeCall, list))
+	node.send(t, nodePacket(t, me, nodeCall, list))
 	waitOutput(t, out, "* rooms: #MAINE #NET")
 
 	// PING is answered with our callsign.
@@ -277,7 +277,7 @@ func TestChat(t *testing.T) {
 	// Incoming: shown once however often it comes, acknowledged each time.
 	back, _ := envelope.BuildMsg(w1aw, me, uint32(time.Now().Unix()), 60, 2, 0, "hi back")
 	for range 2 {
-		node.send(t, qtcPacket(t, me, w1aw, back))
+		node.send(t, nodePacket(t, me, w1aw, back))
 		if _, e := node.expectKind(t, envelope.KindRCPT); e.Destination() != w1aw {
 			t.Errorf("acknowledged with %s", e)
 		}
@@ -287,23 +287,23 @@ func TestChat(t *testing.T) {
 		t.Errorf("shown %d times", n)
 	}
 	eve, _ := envelope.BuildMsg(k1abc, net, uint32(time.Now().Unix()), 60, 3, 0, "evening all")
-	node.send(t, qtcPacket(t, net, k1abc, eve))
+	node.send(t, nodePacket(t, net, k1abc, eve))
 	waitOutput(t, out, " #NET K1ABC: evening all")
 	if _, e := node.expectKind(t, envelope.KindACK); e == nil {
 		t.Error("room message not acknowledged")
 	}
 	fromNode, _ := envelope.BuildMsg(nodeCall, me, uint32(time.Now().Unix()), 60, 4, 0, "3 older messages not sent")
-	node.send(t, qtcPacket(t, me, nodeCall, fromNode))
+	node.send(t, nodePacket(t, me, nodeCall, fromNode))
 	waitOutput(t, out, " * 3 older messages not sent")
 
 	// A receipt for something we sent.
 	dl, _ := envelope.BuildRcpt(w1aw, me, hello.ID(), envelope.StatusDelivered, 1, 0, "")
-	node.send(t, qtcPacket(t, me, w1aw, dl))
+	node.send(t, nodePacket(t, me, w1aw, dl))
 	waitOutput(t, out, `* W1AW received "hello there"`)
 
 	// NOTIFY starts a sync from the saved position.
 	notify, _ := envelope.BuildSync(envelope.SyncNotify, 0, 0, 0, 0, 4)
-	node.send(t, qtcPacket(t, me, nodeCall, notify))
+	node.send(t, nodePacket(t, me, nodeCall, notify))
 	_, e = node.expectKind(t, envelope.KindSYNC)
 	if y, _ := e.Sync(); y.Op() != envelope.SyncRequest || y.Cursor() != 500 || y.Skip() != 1 {
 		t.Errorf("sync after NOTIFY %s", e)

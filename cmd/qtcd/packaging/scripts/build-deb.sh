@@ -28,7 +28,7 @@ mkdir -p "$ROOT/DEBIAN" "$ROOT/usr/bin" "$ROOT/usr/lib/systemd/system" \
     "$ROOT/usr/share/qtcd" "$ROOT/usr/share/doc/qtcd"
 
 LDFLAGS="-s -w -X main.version=${VERSION}"
-for cmd in qtcd qtc; do
+for cmd in qtcd qtc qtc-radio; do
     GOWORK=off CGO_ENABLED=0 GOOS=linux GOARCH=$GOARCH GOARM=$GOARM \
         go build -trimpath -ldflags "$LDFLAGS" -o "$ROOT/usr/bin/$cmd" "./cmd/$cmd"
 done
