@@ -259,3 +259,18 @@ func mustEncoded(t *testing.T, s string) []byte {
 	}
 	return cs[:]
 }
+
+func TestChatSaysWhenNoAnswer(t *testing.T) {
+	node := newFakeNode(t) // listens, never answers
+	c, _ := newChat("N1ADJ", "A")
+	c.connRetry, c.noAnswer = 50*time.Millisecond, 200*time.Millisecond
+	inR, inW := io.Pipe()
+	defer inW.Close()
+	out := &syncBuffer{}
+	go c.run(context.Background(), node.addr(), inR, out)
+	waitOutput(t, out, "No answer from "+node.addr()+" yet; still trying.")
+	time.Sleep(400 * time.Millisecond)
+	if n := strings.Count(out.String(), "No answer from"); n != 1 {
+		t.Errorf("warned %d times, want once", n)
+	}
+}

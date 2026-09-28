@@ -91,6 +91,11 @@ type chat struct {
 	// Link timing; tests shorten them.
 	connRetry   time.Duration
 	pingTimeout time.Duration
+	noAnswer    time.Duration // unanswered this long, say so once
+
+	addr        string
+	unanswered  time.Time // when we started waiting for an answer; zero once linked
+	warnedSince time.Time // the wait already warned about
 
 	mu       sync.Mutex
 	out      io.Writer
@@ -110,13 +115,15 @@ func newChat(callsign, module string) (*chat, error) {
 	if len(module) != 1 || module[0] < 'A' || module[0] > 'Z' {
 		return nil, fmt.Errorf("module must be one letter A-Z")
 	}
-	return &chat{me: me, module: module[0], connRetry: 5 * time.Second, pingTimeout: 30 * time.Second}, nil
+	return &chat{me: me, module: module[0], connRetry: 5 * time.Second, pingTimeout: 30 * time.Second, noAnswer: 10 * time.Second}, nil
 }
 
 // run links to the node at addr and chats until the input ends, /quit, or
 // ctx is done. It returns an error if the node refuses the link.
 func (c *chat) run(ctx context.Context, addr string, in io.Reader, out io.Writer) error {
 	c.out = out
+	c.addr = addr
+	c.unanswered = time.Now()
 	raddr, err := net.ResolveUDPAddr("udp", addr)
 	if err != nil {
 		return err
@@ -173,11 +180,19 @@ func (c *chat) keepLinked() {
 	lost := c.linked && time.Since(c.lastPing) > c.pingTimeout
 	if lost {
 		c.linked = false
+		c.unanswered = time.Now()
 	}
 	linked := c.linked
+	warn := !linked && !c.unanswered.IsZero() && c.unanswered != c.warnedSince && time.Since(c.unanswered) >= c.noAnswer
+	if warn {
+		c.warnedSince = c.unanswered
+	}
 	c.mu.Unlock()
 	if lost {
 		c.printf("Link lost; relinking…")
+	}
+	if warn {
+		c.printf("No answer from %s yet; still trying. Check that the station accepts internet clients on that port, and that your callsign is on its allow list.", c.addr)
 	}
 	if !linked {
 		c.sendCONN()
@@ -203,6 +218,7 @@ func (c *chat) read(refused chan<- struct{}) {
 			c.mu.Lock()
 			was := c.linked
 			c.linked, c.lastPing = true, time.Now()
+			c.unanswered = time.Time{}
 			c.learnNode(b)
 			node := c.node
 			c.mu.Unlock()
@@ -225,6 +241,7 @@ func (c *chat) read(refused chan<- struct{}) {
 		case m17.MagicDISC:
 			c.mu.Lock()
 			c.linked = false
+			c.unanswered = time.Now()
 			c.mu.Unlock()
 			c.printf("The node closed the link; relinking…")
 		case m17.MagicM17Packet:
