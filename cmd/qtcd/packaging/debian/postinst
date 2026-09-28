@@ -115,7 +115,7 @@ if [ ! -f "$CONFIG" ]; then
         echo "qtcd: node callsign '$NODE_CALL'; voice on module A goes to $REFLECTOR module $MODULE"
     fi
     if [ ! -f "$HOSTS" ]; then
-        echo "qtcd: warning: no M17Hosts.txt found; set inet.hosts_file in $CONFIG" >&2
+        echo "qtcd: warning: no M17Hosts.txt found; set [Inet] HostsFile in $CONFIG" >&2
     fi
 fi
 

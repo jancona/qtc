@@ -6,10 +6,10 @@ How the hardware runs in `spike-results.md` were set up, so they can be repeated
 
 | Role | Hardware | Arch | Roles used |
 |---|---|---|---|
-| Public station | Raspberry Pi 5 with a public address (`ham.n1adj.net` for the test network) | arm64 | `public`, `relay`, `mailbox`, DHT server. TCP 4001 open to the internet. |
+| Public station | Raspberry Pi 5 with a public address (`ham.n1adj.net` for the test network). 64-bit hardware and kernel, but 32-bit Raspbian: install the **armhf** package. | armhf | `public`, `relay`, `mailbox`, DHT server. TCP 4001 open to the internet. Runs the `qtcd` package as a service. |
 | Second public mailbox station | any Linux box on the LAN | amd64 | public mailbox station; also a station behind NAT for hole-punching runs |
-| Hotspot | Pi with a CC1200 modem running `m17-gateway` | arm64 | the legacy client |
-| Low-memory hotspot | Pi Zero 2 W with an SX1255 modem running `m17-gateway` | arm64 | the memory target |
+| Hotspots | One Pi Zero 2 W, with either a CC1200 or an SX1255 HAT, each on its own SD card (so only one runs at a time) | arm64 | `m17-gateway` and `qtcd` packages; the legacy client and the memory target |
+| Reference receiver | MMDVM hotspot running `m17-gateway` | arm64 | decodes test bursts to check a hotspot's transmissions; count them in its `dashboard.log` |
 | Laptop | | darwin | home station with the client face; extra public mailbox stations as separate processes |
 | Radio | CS7000 running OpenRTX with an SMS client | | appears as `N1ADJ 8` |
 
@@ -33,14 +33,14 @@ A machine run by hand keeps `~/qtcd/` with `qtcd`, `qtcd.ini`, the state files, 
 
 ## Configs
 
-Configs are INI; `cmd/qtcd/config.example.ini` describes every setting. Public station:
+Configs are INI; `cmd/qtcd/config.example.ini` describes every setting. Public station (`/etc/qtcd.ini`, packaged service):
 
 ```ini
 [General]
 Callsign=N1ADJ  P
-DataDir=/home/pi/qtcd
+DataDir=/var/lib/qtcd
 Admin=127.0.0.1:8017
-MetricsInterval=60s
+MetricsInterval=15m
 
 [Network]
 Listen=/ip4/0.0.0.0/tcp/4001
@@ -90,10 +90,12 @@ Mode=native
 
 ## Bring-up
 
-Order: public stations first, then home stations, then the gateway.
+Order: public stations first, then home stations, then the gateway. Packaged stations (the public station and the hotspots) are systemd services: `sudo systemctl restart qtcd`, logs in `journalctl -u qtcd`. On a hotspot, qtcd starts before m17-gateway at boot, and m17-gateway resends its CONN until qtcd answers.
+
+A station run by hand (the laptop):
 
 ```
-ssh <user>@<pi5-lan> 'cd ~/qtcd && pkill -x qtcd; sleep 1; (nohup ./qtcd -config qtcd.ini -log-level debug > qtcd.log 2>&1 &)' < /dev/null
+cd <dir> && pkill -x qtcd; sleep 1; (nohup ./qtcd -config qtcd.ini -log-level debug > qtcd.log 2>&1 &)
 ```
 
 Use `pkill -x qtcd`, never `pkill -f "qtcd -config"`: the pattern matches the SSH session's own command line and kills it. Redirect stdin from `/dev/null` on SSH commands that start background processes, or the session may not return.
@@ -121,6 +123,16 @@ The gateway relinks by itself after a home station restart, with backoff up to a
 
 From the radio: SMS to `N1ADJ M` (one space works) with `/rooms`, `/join TEST`, `#TEST text`; SMS to a callsign for unicast. Legacy radios get no receipts.
 
+## SMS burst tests
+
+`scripts/sms-burst-test.sh` runs on a hotspot and sends numbered bursts to a radio through qtcd, optionally restarting m17-gateway with different settings for each burst; see its header. Key up the radio (not to ECHO) first. Count what the radio decoded by hand, and what a reference receiver decoded from its `dashboard.log`:
+
+```
+grep -oE '"smsMessage":"<label> [0-9]+/30' dashboard.log | sort -u | wc -l
+```
+
+Before a burst, unlink the reference receiver from any shared reflector (or put it on an unused module): m17-gateway forwards every SMS it receives over RF. Calibrate the hotspots first (operator guide, "Getting your hotspot on frequency"); an MMDVM receiver without AFC decodes nothing from a transmitter 400 Hz off.
+
 ## Teardown
 
 Restore the gateway (`sudo cp /etc/m17-gateway.ini.pre-qtc /etc/m17-gateway.ini`, delete the `M17-QTC` line, restart), then `pkill -x qtcd` on the test stations. The public station can stay up.
@@ -132,4 +144,6 @@ Restore the gateway (`sudo cp /etc/m17-gateway.ini.pre-qtc /etc/m17-gateway.ini`
 - A freshly started station has an empty presence table for up to one presence interval; records created in that window see fewer candidates.
 - With `DataDir` set, mailboxes and the delivered-once table are journaled there (`mailbox.jsonl`, `delivered.jsonl`) and survive a restart. Without it they are in memory: a restart empties them and can repeat deliveries. `DataDir` also defaults the key to `<DataDir>/node.key`, so pointing it at `~/qtcd` keeps the existing peer ID.
 - A device heard more than an hour ago (`[Delivery] ReachWindow`) gets nothing until it is heard again: injected test devices go quiet after an hour. Re-inject with `POST /heard`.
+- The burst script sends as `W1AW` through the admin interface, so the node homes W1AW too, and W1AW's mailbox fills with copies of the test messages.
+- The Pi Zero has no clock battery: journal lines from early in a boot carry the time from before NTP sync, so `journalctl --since` can miss them. Use `journalctl -b`.
 - A temporary directory holding test keys and configs may not outlive the session; keep test configs somewhere durable.
