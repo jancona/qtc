@@ -66,7 +66,9 @@ A text message over the air goes out once, and your radio can't confirm it arriv
 
 If you don't have a radio, or want a keyboard, `qtc chat` connects to a QTC hotspot or public station over the internet as a chat client. You need:
 
-- The `qtc` program, from the `qtcd` package or a release tarball on the [releases page](https://github.com/jancona/qtc/releases). Linux builds only for now.
+- The `qtc` program from the [releases page](https://github.com/jancona/qtc/releases): `qtc_…_darwin_arm64.tar.gz` for an Apple Silicon Mac, `darwin_amd64` for an Intel Mac, `qtc_…_windows_amd64.zip` for Windows, or on Linux the `qtcd` package or tarball, which include it. It's a single program with nothing to install; run it from a terminal.
+
+  The builds aren't signed. On a Mac, clear the download quarantine once with `xattr -d com.apple.quarantine qtc`. On Windows, if SmartScreen warns about `qtc.exe`, choose **More info**, then **Run anyway**.
 - The address of a QTC station that accepts internet clients, and your callsign on its allow list. Ask the station's operator.
 
 ```

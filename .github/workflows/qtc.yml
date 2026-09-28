@@ -59,8 +59,53 @@ jobs:
             build/*.deb
             build/*.tar.gz
 
+  cli:
+    needs: test
+    # The qtc command-line tool (qtc chat and the rest) for internet-only
+    # testers on macOS and Windows; Linux users get it in the packages.
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { goos: darwin, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: windows, goarch: amd64 }
+          - { goos: windows, goarch: arm64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build
+        run: |
+          if [[ $GITHUB_REF == refs/tags/v* ]]; then
+            V=${GITHUB_REF#refs/tags/v}
+          else
+            V="0.0.0-dev.${GITHUB_SHA::8}"
+          fi
+          name="qtc_${V}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          mkdir -p "build/$name"
+          exe=qtc; [ "${{ matrix.goos }}" = windows ] && exe=qtc.exe
+          GOWORK=off CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
+            go build -trimpath -ldflags "-s -w -X main.version=${V}" -o "build/$name/$exe" ./cmd/qtc
+          cp LICENSE "build/$name/"
+          cd build
+          if [ "${{ matrix.goos }}" = windows ]; then
+            zip -qr "$name.zip" "$name"
+          else
+            tar -czf "$name.tar.gz" "$name"
+          fi
+          ls -la
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qtc-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            build/*.zip
+            build/*.tar.gz
+
   release:
-    needs: package
+    needs: [package, cli]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
