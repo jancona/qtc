@@ -154,14 +154,14 @@ func TestChat(t *testing.T) {
 		t.Errorf("CONN %q module %c", cs, conn[10])
 	}
 	node.expect(t, m17.MagicCONN)
-	type_("W1AW: too soon")
+	type_("@W1AW too soon")
 	waitOutput(t, out, "Not linked; message not sent.")
 
 	node.send(t, controlWith(m17.MagicACKN, nodeCall))
 	waitOutput(t, out, "Linked to node N1ADJ   P.")
 
 	// Direct message, then plain text to the same callsign.
-	type_("w1aw: hello there")
+	type_("@w1aw hello there")
 	if dst, src, text := node.expectSMS(t); dst.String() != "W1AW" || src.String() != "N1ADJ" || text != "hello there" {
 		t.Errorf("sent %s→%s %q", src, dst, text)
 	}
@@ -169,6 +169,15 @@ func TestChat(t *testing.T) {
 	if dst, _, text := node.expectSMS(t); dst.String() != "W1AW" || text != "again" {
 		t.Errorf("plain text went to %s: %q", dst, text)
 	}
+	// A bare @CALLSIGN switches the recipient without sending.
+	type_("@k1abc")
+	waitOutput(t, out, "Plain text now goes to K1ABC.")
+	type_("switched")
+	if dst, _, text := node.expectSMS(t); dst.String() != "K1ABC" || text != "switched" {
+		t.Errorf("after @k1abc, plain text went to %s: %q", dst, text)
+	}
+	type_("@#net hi")
+	waitOutput(t, out, `"#net" is not a callsign`)
 	// Room message and room command go to the node's callsign.
 	type_("#net hi all")
 	if dst, _, text := node.expectSMS(t); dst != nodeCall || text != "#net hi all" {

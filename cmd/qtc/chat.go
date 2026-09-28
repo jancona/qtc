@@ -25,7 +25,7 @@ import (
 // because it needs the node's callsign from the node's ACKN and PING.
 
 const chatHelp = `Type a message:
-  W1AW: hello         send to a callsign
+  @W1AW hello         send to a callsign
   #NET hello          post to a room
   hello               send to whoever you last wrote to
 Commands:
@@ -298,7 +298,7 @@ func (c *chat) handleInput(line string) bool {
 	case line == "/help":
 		c.printf("%s", chatHelp)
 	case strings.HasPrefix(line, "/to "):
-		to := strings.ToUpper(strings.TrimSpace(line[4:]))
+		to := strings.TrimPrefix(strings.ToUpper(strings.TrimSpace(line[4:])), "@")
 		if !validTarget(to) {
 			c.printf("%q is not a callsign or #ROOM", to)
 			return false
@@ -316,21 +316,28 @@ func (c *chat) handleInput(line string) bool {
 		c.to = strings.ToUpper(room)
 		c.mu.Unlock()
 		c.sendToNode(line)
-	default:
-		if call, msg, ok := strings.Cut(line, ":"); ok && validCallsign(strings.ToUpper(strings.TrimSpace(call))) {
-			to := strings.ToUpper(strings.TrimSpace(call))
-			c.mu.Lock()
-			c.to = to
-			c.mu.Unlock()
-			c.sendSMS(to, strings.TrimSpace(msg))
+	case strings.HasPrefix(line, "@"):
+		call, msg, _ := strings.Cut(line[1:], " ")
+		to := strings.ToUpper(call)
+		if !validCallsign(to) {
+			c.printf("%q is not a callsign", call)
 			return false
 		}
+		c.mu.Lock()
+		c.to = to
+		c.mu.Unlock()
+		if msg = strings.TrimSpace(msg); msg != "" {
+			c.sendSMS(to, msg)
+		} else {
+			c.printf("Plain text now goes to %s.", to)
+		}
+	default:
 		c.mu.Lock()
 		to := c.to
 		c.mu.Unlock()
 		switch {
 		case to == "":
-			c.printf("Who to? Start with a callsign (W1AW: hello) or a room (#NET hello).")
+			c.printf("Who to? Start with a callsign (@W1AW hello) or a room (#NET hello).")
 		case strings.HasPrefix(to, "#"):
 			c.sendToNode(to + " " + line)
 		default:

@@ -79,10 +79,10 @@ qtc chat -callsign N1ADJ -node qtc.example.net
 
 | Type | What happens |
 |---|---|
-| `W1XYZ: hello` | Sends to a callsign |
+| `@W1XYZ hello` | Sends to a callsign |
 | `#MAINE hello` | Posts to a room |
 | `hello` | Sends to whoever you last wrote to, callsign or room |
-| `/to W1XYZ` | Sets who plain text goes to |
+| `/to W1XYZ` or `@W1XYZ` | Sets who plain text goes to, without sending |
 | `/join MAINE`, `/leave MAINE`, `/rooms` | Room commands, answered by the station |
 | `/help`, `/quit` | Help, and disconnect |
 
