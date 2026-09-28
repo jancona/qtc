@@ -80,38 +80,57 @@ def room_decode(v: int):
 
 # ---------------------------------------------------------------- Envelope
 
-PT_MSG, PT_RCPT, PT_ROOM = 0x08, 0x09, 0x0A
+PT_SMS, PT_QTC = 0x05, 0x08
+K_MSG, K_RCPT, K_ROOM, K_SYNC, K_ACK = 0x01, 0x02, 0x03, 0x04, 0x05
 F_SIGNED, F_RCPT_REQ = 0x01, 0x02
 ST_QUEUED, ST_TRANSMITTED, ST_DELIVERED, ST_EXPIRED, ST_REJECTED = 0, 1, 2, 4, 5
 OP_JOIN, OP_LEAVE, OP_LIST, OP_OK, OP_REFUSED = 0, 1, 2, 0x80, 0x81
+SY_REQUEST, SY_FETCH, SY_PAGE, SY_NOTIFY, SY_REFUSED, SY_SUMMARY = 0x00, 0x01, 0x80, 0x81, 0x82, 0x83
+SY_ALL, SY_SENT = 0x01, 0x02
+SIG_CONTEXT = b"QTC"
 
 
-def msg_signing_input(version, flags, src, dst, ts, ttl, nonce, body) -> bytes:
+def msg_id_input(version, flags, src, dst, ts, ttl, nonce, body) -> bytes:
     """Envelope §4.3: Version ‖ Flags' ‖ Source ‖ Destination ‖ Timestamp ‖ TTL ‖ Nonce ‖ Body,
-    where Flags' has the SIGNED bit cleared. The Type byte is NOT included."""
+    where Flags' has the SIGNED bit cleared. The Type and Kind bytes are NOT included."""
     return (bytes([version, flags & ~F_SIGNED]) + addr_bytes(src) + addr_bytes(dst)
             + struct.pack(">IHH", ts, ttl, nonce) + body)
 
 
+def signing_input(kind, fields: bytes) -> bytes:
+    """Envelope §3: "QTC" ‖ Kind ‖ Version..end of signed fields, SIGNED cleared."""
+    return SIG_CONTEXT + bytes([kind]) + fields
+
+
 def msg_id(version, flags, src, dst, ts, ttl, nonce, body) -> bytes:
-    return hashlib.sha256(msg_signing_input(version, flags, src, dst, ts, ttl, nonce, body)).digest()[:8]
+    return hashlib.sha256(msg_id_input(version, flags, src, dst, ts, ttl, nonce, body)).digest()[:8]
 
 
 def build_msg(src, dst, ts, ttl, nonce, body: bytes, flags=0, sig: bytes = b"", version=0) -> bytes:
     if sig:
         flags |= F_SIGNED
     assert (flags & F_SIGNED) == bool(sig)
-    hdr = bytes([PT_MSG, version, flags]) + addr_bytes(src) + addr_bytes(dst) + struct.pack(">IHH", ts, ttl, nonce)
+    hdr = bytes([PT_QTC, K_MSG, version, flags]) + addr_bytes(src) + addr_bytes(dst) + struct.pack(">IHH", ts, ttl, nonce)
     return hdr + body + sig
 
 
 def build_rcpt(src, dst, mid: bytes, status, ts, last_heard=0, note: bytes = b"", flags=0, version=0) -> bytes:
-    return (bytes([PT_RCPT, version, flags]) + addr_bytes(src) + addr_bytes(dst) + mid
+    return (bytes([PT_QTC, K_RCPT, version, flags]) + addr_bytes(src) + addr_bytes(dst) + mid
             + bytes([status]) + struct.pack(">II", ts, last_heard) + note)
 
 
 def build_room(op, ts, rooms, note: bytes = b"", version=0, flags=0) -> bytes:
-    return bytes([PT_ROOM, version, flags, op]) + struct.pack(">I", ts) + bytes([len(rooms)]) + b"".join(addr_bytes(r) for r in rooms) + note
+    return bytes([PT_QTC, K_ROOM, version, flags, op]) + struct.pack(">I", ts) + bytes([len(rooms)]) + b"".join(addr_bytes(r) for r in rooms) + note
+
+
+def build_sync(op, cursor=0, skip=0, count=0, remaining=0, tail: bytes = b"", flags=0, version=0) -> bytes:
+    """Native Clients §5.1."""
+    return bytes([PT_QTC, K_SYNC, version, flags, op]) + struct.pack(">IHBH", cursor, skip, count, remaining) + tail
+
+
+def build_ack(ids, version=0, flags=0) -> bytes:
+    """Native Clients §4.1."""
+    return bytes([PT_QTC, K_ACK, version, flags, len(ids)]) + b"".join(ids)
 
 
 def sign(priv, data: bytes) -> bytes:
@@ -129,16 +148,20 @@ def hx(b: bytes) -> str:
 
 def main():
     fx = {
-        "qtc_fixtures_version": 3,
+        "qtc_fixtures_version": 4,
         "notes": [
             "All byte strings are lowercase hex. All integers are decimal.",
-            "Packet types are provisional (Envelope spec §3).",
-            "Message IDs hash Version..Body with the SIGNED flag cleared; the Type byte is excluded (Envelope §4.3).",
-            "Signatures are ECDSA secp256r1 over SHA-256 of the same bytes, raw r||s, RFC 6979 deterministic nonces (Envelope §4.6). RCPT signing input is Version..Note with SIGNED cleared (§5.4).",
+            "The QTC packet type value is provisional (Envelope spec §3). Every QTC payload is Type (0x08), Kind, then the kind's layout.",
+            "Message IDs hash Version..Body with the SIGNED flag cleared; the Type and Kind bytes are excluded (Envelope §4.3).",
+            "Signatures are ECDSA secp256r1 over SHA-256 of the signing input \"QTC\" || Kind || Version..end of signed fields with SIGNED cleared, raw r||s, RFC 6979 deterministic nonces (Envelope §3, §4.6, §5.4). The signed digest is therefore not the hash the message ID is taken from.",
             "expiry is null when it is not determined by the envelope alone (timestamp 0 or TTL 0xFFFF); tests must not check it then.",
             "base_callsign is the mechanical normalization only; callers apply the rule that node callsigns are used whole.",
         ],
-        "packet_types": {"MSG": PT_MSG, "RCPT": PT_RCPT, "ROOM": PT_ROOM},
+        "packet_types": {"SMS": PT_SMS, "QTC": PT_QTC},
+        "kinds": {"MSG": K_MSG, "RCPT": K_RCPT, "ROOM": K_ROOM, "SYNC": K_SYNC, "ACK": K_ACK},
+        "signing_context": hx(SIG_CONTEXT),
+        "sync_ops": {"REQUEST": SY_REQUEST, "FETCH": SY_FETCH, "PAGE": SY_PAGE, "NOTIFY": SY_NOTIFY, "REFUSED": SY_REFUSED, "SUMMARY": SY_SUMMARY},
+        "sync_flags": {"ALL": SY_ALL, "SENT": SY_SENT},
         "flags": {"SIGNED": F_SIGNED, "RCPT_REQ": F_RCPT_REQ},
         "rcpt_status": {"QUEUED": 0, "TRANSMITTED": 1, "DELIVERED": 2, "EXPIRED": 4, "REJECTED": 5},
         "room_ops": {"JOIN": 0, "LEAVE": 1, "LIST": 2, "OK": 0x80, "REFUSED": 0x81},
@@ -197,7 +220,8 @@ def main():
         e = {"name": name, "description": desc, "type": "MSG", "bytes": hx(raw), "length": len(raw),
              "fields": {"version": 0, "flags": f, "source": hx(addr_bytes(src)), "destination": hx(addr_bytes(dst)),
                         "timestamp": ts, "ttl_minutes": ttl, "nonce": nonce, "body": body.decode("utf-8")},
-             "signing_input": hx(msg_signing_input(0, f, src, dst, ts, ttl, nonce, body)),
+             "id_input": hx(msg_id_input(0, f, src, dst, ts, ttl, nonce, body)),
+             "signing_input": hx(signing_input(K_MSG, msg_id_input(0, f, src, dst, ts, ttl, nonce, body))),
              "message_id": hx(msg_id(0, f, src, dst, ts, ttl, nonce, body)),
              "expiry": None if (ts == 0 or ttl == 0xFFFF) else ts + ttl * 60}
         e.update(extra)
@@ -221,8 +245,8 @@ def main():
             note="RCPT_REQ set but ignored for rooms")
     add_msg("msg_empty_body", "Zero-length body is legal",
             N1ADJ, W1AW, T0 + 360, 60, 0x0006, b"")
-    add_msg("msg_max_body_unsigned", "800-byte body: the maximum unsigned (§4.5)",
-            N1ADJ, W1AW, T0 + 420, 1440, 0x0007, bytes(((i % 26) + 65) for i in range(800)))
+    add_msg("msg_max_body_unsigned", "799-byte body: the maximum unsigned (§4.5)",
+            N1ADJ, W1AW, T0 + 420, 1440, 0x0007, bytes(((i % 26) + 65) for i in range(799)))
     add_msg("msg_same_text_twice", "Same fields as msg_basic except nonce: different message ID",
             N1ADJ, W1AW, T0, 1440, 0x3C80, b"Hi Jim, testing the new envelope.", flags=F_RCPT_REQ)
     add_msg("msg_reserved_flags", "Reserved flag bits set: receivers must ignore them, and they ARE part of the hash",
@@ -234,10 +258,10 @@ def main():
     nums = pub.public_numbers()
     body = b"Signed hello"
     flags = F_RCPT_REQ
-    si = msg_signing_input(0, flags, N1ADJ, W1AW, T0 + 540, 1440, 0x5151, body)
+    si = signing_input(K_MSG, msg_id_input(0, flags, N1ADJ, W1AW, T0 + 540, 1440, 0x5151, body))
     sig = sign(priv, si)
     pub.verify(bytes(0) or __import__("cryptography.hazmat.primitives.asymmetric.utils", fromlist=["encode_dss_signature"]).encode_dss_signature(int.from_bytes(sig[:32], "big"), int.from_bytes(sig[32:], "big")), si, ec.ECDSA(hashes.SHA256()))
-    e = add_msg("msg_signed", "SIGNED|RCPT_REQ. Signature over signing_input; message ID identical whether or not signed",
+    e = add_msg("msg_signed", "SIGNED|RCPT_REQ. Signature over signing_input (\"QTC\" || Kind || id_input); message ID identical whether or not signed",
                 N1ADJ, W1AW, T0 + 540, 1440, 0x5151, body, flags=flags, sig=sig,
                 signature=hx(sig), digest=hx(hashlib.sha256(si).digest()))
     add_msg("msg_signed_stripped", "msg_signed with the signature removed by a node: same message ID",
@@ -266,12 +290,12 @@ def main():
     add_rcpt("rcpt_delivered", "W1AW's client received msg_basic (client-issued, no last_heard)", W1AW, N1ADJ, ST_DELIVERED, T0 + 45)
     add_rcpt("rcpt_expired", "Expired; W1AW never heard", K1XYZ_R, N1ADJ, ST_EXPIRED, T0 + 86400, 0)
     add_rcpt("rcpt_rejected", "Rejected with a note", K1XYZ_R, N1ADJ, ST_REJECTED, T0 + 2, 0, b"callsign blocked")
-    # signed receipt: signature over Version..Note with SIGNED cleared (Envelope §5.4)
+    # signed receipt: signature over "QTC" || Kind || Version..Note with SIGNED cleared (Envelope §5.4)
     unsigned = build_rcpt(W1AW, N1ADJ, mid, ST_DELIVERED, T0 + 46)
-    rsi = unsigned[1:]  # Version through Note; flags byte already 0
+    rsi = signing_input(K_RCPT, unsigned[2:])  # Version through Note; flags byte already 0
     rsig = sign(priv, rsi)
-    signed = bytes([PT_RCPT, 0, F_SIGNED]) + unsigned[3:] + rsig
-    rcpts.append({"name": "rcpt_delivered_signed", "description": "DELIVERED with SIGNED; signing input is Version..Note with SIGNED cleared",
+    signed = bytes([PT_QTC, K_RCPT, 0, F_SIGNED]) + unsigned[4:] + rsig
+    rcpts.append({"name": "rcpt_delivered_signed", "description": "DELIVERED with SIGNED; signing input is \"QTC\" || Kind || Version..Note with SIGNED cleared",
                   "type": "RCPT", "bytes": hx(signed), "length": len(signed),
                   "fields": {"version": 0, "flags": F_SIGNED, "source": hx(addr_bytes(W1AW)), "destination": hx(addr_bytes(N1ADJ)),
                              "message_id": hx(mid), "status": ST_DELIVERED, "timestamp": T0 + 46, "last_heard": 0, "note": ""},
@@ -294,6 +318,45 @@ def main():
     add_room("room_refused", "REFUSED with note; the refused room is listed", OP_REFUSED, T0 + 602, [room_encode("BADROOM")], b"room not carried")
     fx["room_packets"] = rp
 
+    # --- cross-kind: msg_signed's bytes re-labelled as RCPT parse as a RCPT, and must NOT verify,
+    # because the signing input carries the Kind (Envelope §3). Without it they would.
+    relabelled = bytes([PT_QTC, K_RCPT]) + bytes.fromhex(e["bytes"])[2:]
+    fx["cross_kind"] = {
+        "description": "msg_signed with Kind changed to RCPT. It parses as a signed RCPT, but its signature must not verify with the test key",
+        "bytes": hx(relabelled), "verifies": False,
+    }
+
+    # --- native client packets (Native Clients §4.1, §5.1)
+    ids = [bytes.fromhex(x["message_id"]) for x in envs[:2]]
+    sp = []
+    def add_sync(name, desc, op, cursor=0, skip=0, count=0, remaining=0, tail=b"", flags=0):
+        raw = build_sync(op, cursor, skip, count, remaining, tail, flags)
+        sp.append({"name": name, "description": desc, "kind": "SYNC", "bytes": hx(raw), "length": len(raw),
+                   "fields": {"version": 0, "flags": flags, "op": op, "cursor": cursor, "skip": skip, "count": count,
+                              "remaining": remaining, "tail": hx(tail)}})
+    add_sync("sync_request_first", "First sync from a new device: from the start of retention, up to 5 per page", SY_REQUEST, count=5)
+    add_sync("sync_request_all", "Fetch history, including messages already acknowledged and ones the callsign sent", SY_REQUEST,
+             cursor=T0, skip=2, count=5, flags=SY_ALL | SY_SENT)
+    add_sync("sync_page", "Reply: 5 packets follow, 12 remain; the next request starts at T0+300, skipping 1", SY_PAGE,
+             cursor=T0 + 300, skip=1, count=5, remaining=12)
+    add_sync("sync_page_last", "Reply: 3 packets follow and none remain, so the sync ends", SY_PAGE, cursor=T0 + 900, count=3)
+    add_sync("sync_notify", "Unsolicited: 7 messages are waiting", SY_NOTIFY, remaining=7)
+    add_sync("sync_notify_many", "Unsolicited: 0xFFFF means that many or more", SY_NOTIFY, remaining=0xFFFF)
+    add_sync("sync_refused", "Reply: refused, reason in Tail", SY_REFUSED, tail=b"callsign not allowed")
+    add_sync("sync_fetch", "Request the room messages whose 4-byte IDs are listed", SY_FETCH, count=2, tail=b"".join(i[:4] for i in ids))
+    summary_groups = [(MAINE, ids), (room_encode("M17DEV"), ids[:1])]
+    tail = b"".join(addr_bytes(r) + bytes([len(g)]) + b"".join(i[:4] for i in g) for r, g in summary_groups)
+    add_sync("sync_summary", "Room summary: two groups, MAINE with two messages and M17DEV with one", SY_SUMMARY,
+             count=len(summary_groups), tail=tail)
+    sp[-1]["groups"] = [{"room": hx(addr_bytes(r)), "ids": [hx(i[:4]) for i in g]} for r, g in summary_groups]
+    fx["sync_packets"] = sp
+    fx["ack_packets"] = [
+        {"name": "ack_one", "description": "Acknowledge msg_basic", "kind": "ACK", "bytes": hx(build_ack(ids[:1])),
+         "ids": [hx(i) for i in ids[:1]]},
+        {"name": "ack_two", "description": "Acknowledge two messages in one packet", "kind": "ACK", "bytes": hx(build_ack(ids)),
+         "ids": [hx(i) for i in ids]},
+    ]
+
     # --- SMS wrapping (Envelope §6)
     sms = bytes([0x05]) + b"  Hello from a legacy radio  \x00"
     ts, nonce = T0 + 900, 0x7A7A
@@ -310,20 +373,30 @@ def main():
 
     # --- invalid envelopes
     fx["invalid_envelopes"] = [
-        {"name": "truncated_header", "bytes": hx(bytes.fromhex(ex["bytes"])[:20]), "reason": "shorter than the 23-byte MSG header"},
-        {"name": "signed_flag_too_short", "bytes": hx(bytes([PT_MSG, 0, F_SIGNED]) + addr_bytes(N1ADJ) + addr_bytes(W1AW) + struct.pack(">IHH", T0, 60, 1) + b"short"),
+        {"name": "truncated_header", "bytes": hx(bytes.fromhex(ex["bytes"])[:20]), "reason": "shorter than the 24-byte MSG header"},
+        {"name": "signed_flag_too_short", "bytes": hx(bytes([PT_QTC, K_MSG, 0, F_SIGNED]) + addr_bytes(N1ADJ) + addr_bytes(W1AW) + struct.pack(">IHH", T0, 60, 1) + b"short"),
          "reason": "SIGNED set but payload shorter than header + 64"},
-        {"name": "unknown_version", "bytes": hx(bytes([PT_MSG, 1, 0]) + addr_bytes(N1ADJ) + addr_bytes(W1AW) + struct.pack(">IHH", T0, 60, 1) + b"v1"),
+        {"name": "unknown_version", "bytes": hx(bytes([PT_QTC, K_MSG, 1, 0]) + addr_bytes(N1ADJ) + addr_bytes(W1AW) + struct.pack(">IHH", T0, 60, 1) + b"v1"),
          "reason": "version 1 is not defined; must be rejected (or handled by a future parser)"},
-        {"name": "body_too_long", "bytes": hx(build_msg(N1ADJ, W1AW, T0, 60, 1, b"A" * 801)), "reason": "801-byte body exceeds the 823-byte packet"},
-        {"name": "rcpt_truncated", "bytes": hx(build_rcpt(K1XYZ_R, N1ADJ, mid, ST_QUEUED, T0)[:30]), "reason": "shorter than the 32-byte RCPT header"},
-        {"name": "room_count_mismatch", "bytes": hx(bytes([PT_ROOM, 0, 0, OP_JOIN]) + struct.pack(">I", T0) + bytes([2]) + addr_bytes(MAINE)),
+        {"name": "body_too_long", "bytes": hx(build_msg(N1ADJ, W1AW, T0, 60, 1, b"A" * 800)), "reason": "800-byte body exceeds the 823-byte packet"},
+        {"name": "rcpt_truncated", "bytes": hx(build_rcpt(K1XYZ_R, N1ADJ, mid, ST_QUEUED, T0)[:30]), "reason": "shorter than the 33-byte RCPT header"},
+        {"name": "room_count_mismatch", "bytes": hx(bytes([PT_QTC, K_ROOM, 0, 0, OP_JOIN]) + struct.pack(">I", T0) + bytes([2]) + addr_bytes(MAINE)),
          "reason": "count says 2 rooms, only one present"},
+        {"name": "unknown_kind", "bytes": hx(bytes([PT_QTC, 0x06, 0, 0])), "reason": "kind 0x06 is not defined; receivers ignore it"},
+        {"name": "not_qtc", "bytes": hx(bytes([PT_SMS]) + b"hello\x00"), "reason": "an SMS, not a QTC payload"},
+        {"name": "old_format_msg", "bytes": hx(bytes([PT_QTC, 0, F_RCPT_REQ]) + addr_bytes(N1ADJ) + addr_bytes(W1AW) + struct.pack(">IHH", T0, 1440, 0x3C7F) + b"Hi"),
+         "reason": "the pre-Kind MSG layout: byte 1 is 0x00, which is the reserved kind"},
+        {"name": "ack_empty", "bytes": hx(build_ack([])), "reason": "an ACK lists at least one ID"},
+        {"name": "ack_count_mismatch", "bytes": hx(build_ack(ids)[:-4]), "reason": "count says 2 IDs, the second is cut short"},
+        {"name": "sync_fetch_mismatch", "bytes": hx(build_sync(SY_FETCH, count=3, tail=ids[0][:4])), "reason": "FETCH count says 3 IDs, Tail holds one"},
+        {"name": "sync_summary_overrun", "bytes": hx(build_sync(SY_SUMMARY, count=1, tail=addr_bytes(MAINE) + bytes([2]) + ids[0][:4])),
+         "reason": "the summary group says 2 IDs, Tail holds one"},
     ]
 
-    os.makedirs("/mnt/user-data/outputs", exist_ok=True)
-    with open("/mnt/user-data/outputs/qtc-fixtures.json", "w") as f:
+    out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "qtc-fixtures.json")
+    with open(out, "w") as f:
         json.dump(fx, f, indent=2, ensure_ascii=False)
+        f.write("\n")
     print("ok", len(fx["envelopes"]), "envelopes")
     # sanity against hand-computed values in the envelope spec example
     assert hx(addr_bytes(N1ADJ)) == "0000018a92ae", hx(addr_bytes(N1ADJ))

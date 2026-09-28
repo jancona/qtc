@@ -85,12 +85,13 @@ type message struct {
 	Callsigns []string `json:"callsigns,omitempty"`
 	Env       string   `json:"env,omitempty"`
 	Envs      []string `json:"envs"`
+	At        []uint32 `json:"at"`
 	ID        string   `json:"id,omitempty"`
 	Code      Code     `json:"code,omitempty"`
 	Reason    string   `json:"reason,omitempty"`
 	Since     *uint32  `json:"since,omitempty"`
 	Limit     *int     `json:"limit,omitempty"`
-	Types     []int    `json:"types,omitempty"`
+	Kinds     []int    `json:"kinds,omitempty"`
 	Next      *uint32  `json:"next"`
 }
 
@@ -108,21 +109,25 @@ func (m message) MarshalJSON() ([]byte, error) {
 		Reason    string   `json:"reason,omitempty"`
 		Since     *uint32  `json:"since,omitempty"`
 		Limit     *int     `json:"limit,omitempty"`
-		Types     []int    `json:"types,omitempty"`
+		Kinds     []int    `json:"kinds,omitempty"`
 	}
-	c := common{m.Type, m.Callsign, m.Callsigns, m.Env, m.ID, m.Code, m.Reason, m.Since, m.Limit, m.Types}
+	c := common{m.Type, m.Callsign, m.Callsigns, m.Env, m.ID, m.Code, m.Reason, m.Since, m.Limit, m.Kinds}
 	if m.Type != TypeResult {
 		return json.Marshal(c)
 	}
-	envs := m.Envs
+	envs, at := m.Envs, m.At
 	if envs == nil {
 		envs = []string{}
+	}
+	if at == nil {
+		at = []uint32{}
 	}
 	return json.Marshal(struct {
 		common
 		Envs []string `json:"envs"`
+		At   []uint32 `json:"at"`
 		Next *uint32  `json:"next"`
-	}{c, envs, m.Next})
+	}{c, envs, at, m.Next})
 }
 
 func encodeEnv(e *envelope.Envelope) string {

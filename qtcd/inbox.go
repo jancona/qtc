@@ -274,5 +274,14 @@ func (s *mailboxSet) query(ctx context.Context, id peer.ID, base envelope.Addres
 	if err != nil {
 		return nil, err
 	}
-	return cl.QueryAll(ctx, base, since, []envelope.PacketType{envelope.TypeMSG, envelope.TypeRCPT, envelope.TypeROOM})
+	return cl.QueryAll(ctx, base, since, []envelope.Kind{envelope.KindMSG, envelope.KindRCPT, envelope.KindROOM})
+}
+
+// queryRecords runs QueryAllRecords against one member, for MSG and RCPT.
+func (s *mailboxSet) queryRecords(ctx context.Context, id peer.ID, base envelope.Address, since uint32) ([]store.Record, error) {
+	cl, err := s.conn(id).client(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return cl.QueryAllRecords(ctx, base, since, []envelope.Kind{envelope.KindMSG, envelope.KindRCPT})
 }

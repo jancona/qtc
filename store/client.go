@@ -165,13 +165,23 @@ func (c *Client) Put(ctx context.Context, callsign envelope.Address, e *envelope
 // Query fetches envelopes stored for callsign since the given received-at
 // time. types empty means the server default (MSG and RCPT). more is true
 // when another page exists starting at next.
-func (c *Client) Query(ctx context.Context, callsign envelope.Address, since uint32, limit int, types []envelope.PacketType) (envs []*envelope.Envelope, next uint32, more bool, err error) {
+func (c *Client) Query(ctx context.Context, callsign envelope.Address, since uint32, limit int, types []envelope.Kind) (envs []*envelope.Envelope, next uint32, more bool, err error) {
+	recs, next, more, err := c.QueryRecords(ctx, callsign, since, limit, types)
+	for _, r := range recs {
+		envs = append(envs, r.Env)
+	}
+	return envs, next, more, err
+}
+
+// QueryRecords is Query with each envelope's received-at time, which a
+// RESULT carries in its "at" array (node protocol §5). Expiry is left zero.
+func (c *Client) QueryRecords(ctx context.Context, callsign envelope.Address, since uint32, limit int, types []envelope.Kind) (recs []Record, next uint32, more bool, err error) {
 	m := message{Type: TypeQuery, Callsign: callsign.Base().String(), Since: &since}
 	if limit > 0 {
 		m.Limit = &limit
 	}
 	for _, t := range types {
-		m.Types = append(m.Types, int(t))
+		m.Kinds = append(m.Kinds, int(t))
 	}
 	r, err := c.request(ctx, m)
 	if err != nil {
@@ -180,37 +190,55 @@ func (c *Client) Query(ctx context.Context, callsign envelope.Address, since uin
 	if r.Type != TypeResult {
 		return nil, 0, false, fmt.Errorf("store: unexpected %s reply to QUERY", r.Type)
 	}
-	for _, s := range r.Envs {
+	base := callsign.Base()
+	for i, s := range r.Envs {
 		e, err := decodeEnv(s)
 		if err != nil {
 			c.log.Warn("store: RESULT with bad envelope", "err", err)
 			continue
 		}
-		envs = append(envs, e)
+		rec := Record{Callsign: base, Env: e}
+		if i < len(r.At) {
+			rec.ReceivedAt = r.At[i]
+		}
+		recs = append(recs, rec)
 	}
 	if r.Next != nil {
-		return envs, *r.Next, true, nil
+		return recs, *r.Next, true, nil
 	}
-	return envs, 0, false, nil
+	return recs, 0, false, nil
 }
 
 // QueryAll pages through Query until no more remain, deduplicating by
 // StoreID since pages may overlap.
-func (c *Client) QueryAll(ctx context.Context, callsign envelope.Address, since uint32, types []envelope.PacketType) ([]*envelope.Envelope, error) {
+func (c *Client) QueryAll(ctx context.Context, callsign envelope.Address, since uint32, types []envelope.Kind) ([]*envelope.Envelope, error) {
+	recs, err := c.QueryAllRecords(ctx, callsign, since, types)
+	out := make([]*envelope.Envelope, 0, len(recs))
+	for _, r := range recs {
+		out = append(out, r.Env)
+	}
+	return out, err
+}
+
+// QueryAllRecords is QueryAll with received-at times.
+func (c *Client) QueryAllRecords(ctx context.Context, callsign envelope.Address, since uint32, types []envelope.Kind) ([]Record, error) {
 	seen := map[envelope.ID]bool{}
-	var out []*envelope.Envelope
+	var out []Record
 	for {
-		envs, next, more, err := c.Query(ctx, callsign, since, MaxLimit, types)
+		recs, next, more, err := c.QueryRecords(ctx, callsign, since, MaxLimit, types)
 		if err != nil {
 			return out, err
 		}
-		for _, e := range envs {
-			if id := e.StoreID(); !seen[id] {
+		fresh := 0
+		for _, r := range recs {
+			if id := r.ID(); !seen[id] {
 				seen[id] = true
-				out = append(out, e)
+				fresh++
+				out = append(out, r)
 			}
 		}
-		if !more || len(envs) == 0 {
+		// A page of nothing new would repeat forever.
+		if !more || fresh == 0 {
 			return out, nil
 		}
 		since = next

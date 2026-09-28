@@ -16,7 +16,7 @@ Non-goals for this version: voice routing, message confidentiality, private room
 
 ## 2. Components
 
-**Radios and clients.** Anything that speaks M17. Legacy devices send SMS (type `0x05`) and are treated as terminals: they see what is transmitted to them and nothing else. Native devices speak the QTC envelope (MSG/RCPT/ROOM) and can dedup, sync, and acknowledge.
+**Radios and clients.** Anything that speaks M17. Legacy devices send SMS (type `0x05`) and are treated as terminals: they see what is transmitted to them and nothing else. Native devices speak the QTC packet type (`0x08`) and can dedup, sync, and acknowledge.
 
 **qtcd** is the node daemon. QTC is the Q-code for "I have messages for you." It runs on a hotspot, a repeater controller, a VPS, or embedded in a client. It presents a standard [M17_inet](https://github.com/M17-Project/M17_inet) reflector interface on the local side, so any gateway links to it exactly as it would to a reflector, and it proxies voice and unrelated packet traffic to the user's chosen upstream reflector transparently. It intercepts messaging traffic and speaks the QTC node protocol to the rest of the network.
 
@@ -74,9 +74,10 @@ The node protocol runs on go-libp2p: TLS transport, peer identity from the node 
 
 | Document | Covers |
 |---|---|
-| QTC: Message Envelope | MSG and RCPT packet types; message IDs; TTL; signatures |
-| QTC: Rooms | Room addressing, subscriptions, ROOM control type |
+| QTC: Message Envelope | The QTC packet type and its kinds; MSG and RCPT; message IDs; TTL; signatures |
+| QTC: Rooms | Room addressing, subscriptions, ROOM control kind |
 | QTC: Node Protocol | Identity, peering, presence, mailbox records, storage protocol, delivery |
+| QTC: Native Clients | Acknowledgement, retry, sync, and room summaries between native devices and their node |
 
 ## 9. Milestones
 
@@ -99,6 +100,5 @@ Later, demand-driven rather than sequenced:
 
 ## 10. Open Questions
 
-1. **Presence establishment.** A station homes a callsign when it hears it. How a radio makes itself heard on arrival (keying up, a beacon, something in OpenRTX) shapes the user experience more than anything in the routing. Deliberately unresolved.
-2. **Thin clients.** A phone or browser client can be a libp2p peer over WebSocket, or public stations can expose the storage protocol directly. To be decided after the spike.
-3. **Quotas and abuse.** Anyone can create a mailbox for any callsign and put to it. Per-node quotas are assumed; nothing is specified.
+1. **Presence establishment.** A station homes a callsign when it hears it. How a legacy radio makes itself heard on arrival (keying up, a beacon) shapes the user experience more than anything in the routing. Deliberately unresolved for legacy radios; a native device syncs on arrival, which announces it (Native Clients §5.3).
+2. **Quotas and abuse.** Anyone can create a mailbox for any callsign and put to it. Per-node quotas are assumed; nothing is specified.

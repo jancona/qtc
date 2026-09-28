@@ -76,15 +76,31 @@ func (n *fakeNode) expect(t *testing.T, magic string) []byte {
 	}
 }
 
-// expectSMS waits for an SMS and returns its destination and text.
-func (n *fakeNode) expectSMS(t *testing.T) (dst, src envelope.Address, text string) {
+// expectQTC waits for a QTC packet and returns its LSF addresses and the
+// parsed payload.
+func (n *fakeNode) expectQTC(t *testing.T) (dst, src envelope.Address, e *envelope.Envelope) {
 	t.Helper()
 	b := n.expect(t, m17.MagicM17Packet)
 	p := m17.NewPacketFromBytes(b[4:])
-	if !p.CheckCRC() || p.Type != m17.PacketTypeSMS {
-		t.Fatalf("bad SMS packet % x", b)
+	if !p.LSF.CheckCRC() || !p.CheckCRC() || byte(p.Type) != byte(envelope.TypeQTC) {
+		t.Fatalf("bad QTC packet % x", b)
 	}
-	return envelope.AddressFromBytes(p.LSF.Dst[:]), envelope.AddressFromBytes(p.LSF.Src[:]), strings.TrimSuffix(string(p.Payload), "\x00")
+	e, err := envelope.Parse(append([]byte{byte(p.Type)}, p.Payload...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return envelope.AddressFromBytes(p.LSF.Dst[:]), envelope.AddressFromBytes(p.LSF.Src[:]), e
+}
+
+// expectKind waits for a QTC packet of one kind, skipping others.
+func (n *fakeNode) expectKind(t *testing.T, k envelope.Kind) (envelope.Address, *envelope.Envelope) {
+	t.Helper()
+	for {
+		dst, _, e := n.expectQTC(t)
+		if e.Kind() == k {
+			return dst, e
+		}
+	}
 }
 
 func controlWith(magic string, a envelope.Address) []byte {
@@ -92,13 +108,29 @@ func controlWith(magic string, a envelope.Address) []byte {
 	return append([]byte(magic), b[:]...)
 }
 
-func sms(t *testing.T, dst, src, text string) []byte {
+// qtcPacket frames a QTC payload from the node side.
+func qtcPacket(t *testing.T, dst, src envelope.Address, e *envelope.Envelope) []byte {
 	t.Helper()
-	p, err := m17.NewPacket(dst, src, m17.PacketTypeSMS, append([]byte(text), 0))
+	lsf, err := m17.NewLSF("N1ADJ", "N1ADJ", m17.LSFTypePacket, m17.LSFDataTypeData, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
+	lsf.Dst = m17.EncodedCallsign(dst.Bytes())
+	lsf.Src = m17.EncodedCallsign(src.Bytes())
+	lsf.CalcCRC()
+	b := e.Bytes()
+	p := m17.Packet{LSF: &lsf, Type: m17.PacketType(b[0]), Payload: b[1:]}
+	p.CalcCRC()
 	return append([]byte(m17.MagicM17Packet), p.ToBytes()...)
+}
+
+func addrOf(t *testing.T, s string) envelope.Address {
+	t.Helper()
+	a, err := envelope.ParseAddress(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return a
 }
 
 // syncBuffer is an io.Writer the test can read while the client writes.
@@ -132,12 +164,15 @@ func waitOutput(t *testing.T, out *syncBuffer, want string) {
 
 func TestChat(t *testing.T) {
 	node := newFakeNode(t)
-	nodeCall, _ := envelope.EncodeAddress("N1ADJ   P")
+	nodeCall := addrOf(t, "N1ADJ   P")
+	me, w1aw, k1abc := addrOf(t, "N1ADJ"), addrOf(t, "W1AW"), addrOf(t, "K1ABC")
 	c, err := newChat("n1adj", "a")
 	if err != nil {
 		t.Fatal(err)
 	}
 	c.connRetry = 100 * time.Millisecond
+	c.ackTimeout, c.ackRetries, c.pageQuiet = 200*time.Millisecond, 1, 200*time.Millisecond
+	c.statePath = t.TempDir() + "/sync.json"
 	inR, inW := io.Pipe()
 	out := &syncBuffer{}
 	done := make(chan error, 1)
@@ -146,6 +181,18 @@ func TestChat(t *testing.T) {
 		if _, err := io.WriteString(inW, s+"\n"); err != nil {
 			t.Fatal(err)
 		}
+	}
+	// expectMsg waits for a MSG from us and acknowledges it.
+	expectMsg := func(to envelope.Address, body string) *envelope.Envelope {
+		t.Helper()
+		_, e := node.expectKind(t, envelope.KindMSG)
+		m, _ := e.Msg()
+		if e.Destination() != to || e.Source() != me || m.Body() != body {
+			t.Fatalf("sent %s", e)
+		}
+		ack, _ := envelope.BuildAck([]envelope.ID{e.ID()})
+		node.send(t, qtcPacket(t, me, nodeCall, ack))
+		return e
 	}
 
 	// CONN carries our callsign and module; resent until answered.
@@ -157,40 +204,69 @@ func TestChat(t *testing.T) {
 	type_("@W1AW too soon")
 	waitOutput(t, out, "Not linked; message not sent.")
 
+	// Linking starts a sync from the beginning; a page of one message.
 	node.send(t, controlWith(m17.MagicACKN, nodeCall))
 	waitOutput(t, out, "Linked to node N1ADJ   P.")
+	dst, e := node.expectKind(t, envelope.KindSYNC)
+	if y, _ := e.Sync(); dst != nodeCall || y.Op() != envelope.SyncRequest || y.Cursor() != 0 || y.Skip() != 0 {
+		t.Fatalf("sync request %s to %s", e, dst)
+	}
+	page, _ := envelope.BuildSync(envelope.SyncPage, 0, 500, 1, 1, 0)
+	node.send(t, qtcPacket(t, me, nodeCall, page))
+	missed, _ := envelope.BuildMsg(w1aw, me, uint32(time.Now().Unix()), 60, 1, envelope.FlagRcptReq, "while you were away")
+	node.send(t, qtcPacket(t, me, w1aw, missed))
+	waitOutput(t, out, " W1AW: while you were away")
+	if _, e := node.expectKind(t, envelope.KindRCPT); e.Source() != me || e.Destination() != w1aw {
+		t.Errorf("acknowledged with %s", e)
+	} else if rc, _ := e.Rcpt(); rc.Status() != envelope.StatusDelivered || rc.MessageID() != missed.ID() {
+		t.Errorf("acknowledged with %s", e)
+	}
+	eventually(t, "sync position saved", func() bool {
+		b, err := os.ReadFile(c.statePath)
+		return err == nil && string(b) == `{"cursor":500,"skip":1}`
+	})
 
-	// Direct message, then plain text to the same callsign.
+	// Direct message: resent until the node acknowledges it.
 	type_("@w1aw hello there")
-	if dst, src, text := node.expectSMS(t); dst.String() != "W1AW" || src.String() != "N1ADJ" || text != "hello there" {
-		t.Errorf("sent %s→%s %q", src, dst, text)
+	_, first := node.expectKind(t, envelope.KindMSG)
+	hello := expectMsg(w1aw, "hello there")
+	if hello.ID() != first.ID() {
+		t.Errorf("resend was a different message")
+	}
+	if m, _ := hello.Msg(); !m.RcptReq() {
+		t.Error("direct message does not ask for receipts")
 	}
 	type_("again")
-	if dst, _, text := node.expectSMS(t); dst.String() != "W1AW" || text != "again" {
-		t.Errorf("plain text went to %s: %q", dst, text)
-	}
+	expectMsg(w1aw, "again")
 	// A bare @CALLSIGN switches the recipient without sending.
 	type_("@k1abc")
 	waitOutput(t, out, "Plain text now goes to K1ABC.")
 	type_("switched")
-	if dst, _, text := node.expectSMS(t); dst.String() != "K1ABC" || text != "switched" {
-		t.Errorf("after @k1abc, plain text went to %s: %q", dst, text)
-	}
+	expectMsg(k1abc, "switched")
 	type_("@#net hi")
 	waitOutput(t, out, `"#net" is not a callsign`)
-	// Room message and room command go to the node's callsign.
+	// Room messages go to the room's address.
+	net, _ := envelope.RoomAddress("NET")
 	type_("#net hi all")
-	if dst, _, text := node.expectSMS(t); dst != nodeCall || text != "#net hi all" {
-		t.Errorf("room message to %s: %q", dst, text)
-	}
+	expectMsg(net, "hi all")
 	type_("more for the room")
-	if dst, _, text := node.expectSMS(t); dst != nodeCall || text != "#NET more for the room" {
-		t.Errorf("plain text to room: %s %q", dst, text)
-	}
+	expectMsg(net, "more for the room")
+
+	// Room commands are ROOM requests.
+	maine, _ := envelope.RoomAddress("MAINE")
 	type_("/join MAINE")
-	if dst, _, text := node.expectSMS(t); dst != nodeCall || text != "/join MAINE" {
-		t.Errorf("command to %s: %q", dst, text)
+	dst, e = node.expectKind(t, envelope.KindROOM)
+	if r, _ := e.Room(); dst != nodeCall || r.Op() != envelope.OpJoin || len(r.Rooms()) != 1 || r.Rooms()[0] != maine {
+		t.Errorf("join %s to %s", e, dst)
 	}
+	ok, _ := envelope.BuildRoom(envelope.OpOK, 1, nil, "")
+	node.send(t, qtcPacket(t, me, nodeCall, ok))
+	waitOutput(t, out, "* joined")
+	type_("/rooms")
+	node.expectKind(t, envelope.KindROOM)
+	list, _ := envelope.BuildRoom(envelope.OpOK, 1, []envelope.Address{maine, net}, "")
+	node.send(t, qtcPacket(t, me, nodeCall, list))
+	waitOutput(t, out, "* rooms: #MAINE #NET")
 
 	// PING is answered with our callsign.
 	node.send(t, controlWith(m17.MagicPING, nodeCall))
@@ -198,13 +274,44 @@ func TestChat(t *testing.T) {
 		t.Errorf("PONG % x", pong)
 	}
 
-	// Incoming: direct, from the node, and a room message.
-	node.send(t, sms(t, "N1ADJ", "W1AW", "hi back"))
+	// Incoming: shown once however often it comes, acknowledged each time.
+	back, _ := envelope.BuildMsg(w1aw, me, uint32(time.Now().Unix()), 60, 2, 0, "hi back")
+	for range 2 {
+		node.send(t, qtcPacket(t, me, w1aw, back))
+		if _, e := node.expectKind(t, envelope.KindRCPT); e.Destination() != w1aw {
+			t.Errorf("acknowledged with %s", e)
+		}
+	}
 	waitOutput(t, out, " W1AW: hi back")
-	node.send(t, sms(t, "N1ADJ", "N1ADJ   P", "rooms: MAINE NET"))
-	waitOutput(t, out, " * rooms: MAINE NET")
-	node.send(t, sms(t, "N1ADJ", "K1ABC", "#NET evening all"))
+	if n := strings.Count(out.String(), "hi back"); n != 1 {
+		t.Errorf("shown %d times", n)
+	}
+	eve, _ := envelope.BuildMsg(k1abc, net, uint32(time.Now().Unix()), 60, 3, 0, "evening all")
+	node.send(t, qtcPacket(t, net, k1abc, eve))
 	waitOutput(t, out, " #NET K1ABC: evening all")
+	if _, e := node.expectKind(t, envelope.KindACK); e == nil {
+		t.Error("room message not acknowledged")
+	}
+	fromNode, _ := envelope.BuildMsg(nodeCall, me, uint32(time.Now().Unix()), 60, 4, 0, "3 older messages not sent")
+	node.send(t, qtcPacket(t, me, nodeCall, fromNode))
+	waitOutput(t, out, " * 3 older messages not sent")
+
+	// A receipt for something we sent.
+	dl, _ := envelope.BuildRcpt(w1aw, me, hello.ID(), envelope.StatusDelivered, 1, 0, "")
+	node.send(t, qtcPacket(t, me, w1aw, dl))
+	waitOutput(t, out, `* W1AW received "hello there"`)
+
+	// NOTIFY starts a sync from the saved position.
+	notify, _ := envelope.BuildSync(envelope.SyncNotify, 0, 0, 0, 0, 4)
+	node.send(t, qtcPacket(t, me, nodeCall, notify))
+	_, e = node.expectKind(t, envelope.KindSYNC)
+	if y, _ := e.Sync(); y.Op() != envelope.SyncRequest || y.Cursor() != 500 || y.Skip() != 1 {
+		t.Errorf("sync after NOTIFY %s", e)
+	}
+
+	// Never acknowledged: reported as not sent.
+	type_("@w1aw into the void")
+	waitOutput(t, out, `not sent, the node did not answer: "into the void"`)
 
 	type_("/quit")
 	node.expect(t, m17.MagicDISC)
@@ -212,6 +319,17 @@ func TestChat(t *testing.T) {
 		t.Errorf("run = %v", err)
 	}
 	inW.Close()
+}
+
+func eventually(t *testing.T, what string, f func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for !f() {
+		if time.Now().After(deadline) {
+			t.Fatalf("never: %s", what)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 func TestChatNoTarget(t *testing.T) {

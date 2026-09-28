@@ -230,7 +230,7 @@ func TestDeliveryRecordsStopReplayElsewhere(t *testing.T) {
 	// The mailbox holds 10 transmitted and 2 skipped records, addressed to
 	// the recipient; none was delivered to the device.
 	records := func() (tx, skip int) {
-		recs, _, _, _ := r.mem.Query(ht.Base(), 0, 100, []envelope.PacketType{envelope.TypeRCPT})
+		recs, _, _, _ := r.mem.Query(ht.Base(), 0, 100, []envelope.Kind{envelope.KindRCPT})
 		for _, rec := range recs {
 			rc, _ := rec.Env.Rcpt()
 			if rec.Env.Destination() != ht.Base() {
@@ -246,7 +246,7 @@ func TestDeliveryRecordsStopReplayElsewhere(t *testing.T) {
 		return
 	}
 	eventually(t, "records stored", 5*time.Second, func() bool { tx, skip := records(); return tx == 10 && skip == 2 })
-	if n := got.count(func(d delivery) bool { return d.env.Type() == envelope.TypeRCPT }); n != 0 {
+	if n := got.count(func(d delivery) bool { return d.env.Kind() == envelope.KindRCPT }); n != 0 {
 		t.Errorf("%d delivery records were delivered to the device", n)
 	}
 

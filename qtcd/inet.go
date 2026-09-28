@@ -84,6 +84,13 @@ type inetCore interface {
 	inetLocalRoom() envelope.Address
 	inetDefaultTTL() uint16
 	inetLog() *slog.Logger
+
+	// Native devices (docs/qtc-client.md).
+	inetAcked(device envelope.Address, msg, rcpt *envelope.Envelope, fresh bool)
+	inetLost(device envelope.Address, msg *envelope.Envelope, fresh bool)
+	inetSync(device envelope.Address, req envelope.Sync, limit int) (page []*envelope.Envelope, cursor uint32, skip uint16, remaining int, err error)
+	inetReachable(device envelope.Address) bool
+	inetSubscribed(device, room envelope.Address) bool
 }
 
 // Station implements inetCore.
@@ -111,6 +118,7 @@ type inetFace struct {
 	upstream map[byte]*net.UDPAddr             // per module with a reflector; missing until resolved
 	sessions map[string]*inetSession           // by client address
 	devices  map[envelope.Address]*inetSession // device -> qtc-mode session that heard it
+	native   map[envelope.Address]bool         // devices whose latest packet was QTC, not SMS
 	orphans  map[envelope.Address]orphan       // devices whose gateway link closed, until it relinks
 	wg       sync.WaitGroup
 	ctx      context.Context
@@ -138,6 +146,8 @@ type inetSession struct {
 	nextCon time.Time     // when the next CONN may be resent
 
 	lastKeepHeard time.Time // internet clients: when keepHeard last heard the callsign
+
+	nat nativeState // native devices on this link (native.go)
 }
 
 // Link keepalive timing. The node PINGs its client like any reflector, and
@@ -187,6 +197,7 @@ func newInetFace(core inetCore, cfg InetConfig) (*inetFace, error) {
 		upstream: map[byte]*net.UDPAddr{},
 		sessions: map[string]*inetSession{},
 		devices:  map[envelope.Address]*inetSession{},
+		native:   map[envelope.Address]bool{},
 		orphans:  map[envelope.Address]orphan{},
 	}
 	for _, c := range cfg.AllowCallsigns {
@@ -259,8 +270,9 @@ func (f *inetFace) Addr() *net.UDPAddr { return f.conn.LocalAddr().(*net.UDPAddr
 // run serves until ctx ends, then closes every session.
 func (f *inetFace) run(ctx context.Context) {
 	f.ctx, f.cancel = context.WithCancel(ctx)
-	f.wg.Add(1)
+	f.wg.Add(2)
 	go f.reaper()
+	go f.nativeLoop()
 	if f.hasUpstreams() {
 		f.wg.Add(1)
 		go f.refreshHosts()
@@ -431,6 +443,7 @@ func (f *inetFace) connect(b []byte, addr *net.UDPAddr) {
 		up:       up,
 		last:     time.Now(),
 		heardAt:  map[envelope.Address]time.Time{},
+		nat:      newNativeState(),
 	}
 	f.mu.Lock()
 	if old := f.sessions[addr.String()]; old != nil {
@@ -671,10 +684,11 @@ func (s *inetSession) clientPacket(b []byte) {
 		s.heard(pf.src)
 	}
 	switch pf.typ {
-	case envelope.TypeMSG, envelope.TypeRCPT, envelope.TypeROOM:
+	case envelope.TypeQTC:
 		s.ingestEnvelope(pf)
 	case envelope.TypeSMS:
 		if s.qtcMode {
+			s.face.setNative(pf.src, false)
 			s.ingestSMS(pf)
 		} else {
 			s.forwardUp(b)
@@ -684,14 +698,24 @@ func (s *inetSession) clientPacket(b []byte) {
 	}
 }
 
-// ingestEnvelope takes a native QTC packet into the station.
+// ingestEnvelope takes a QTC packet into the station. On a qtc module its
+// sender is a native device (client spec §2), with acknowledgement, sync,
+// and fetch; on a native module MSG, RCPT, and ROOM are still taken in,
+// since no reflector understands them.
 func (s *inetSession) ingestEnvelope(pf packetFrame) {
 	e, err := envelope.Parse(pf.payload)
 	if err != nil {
-		s.face.log.Info("bad envelope from client", "client", s.client, "err", err)
+		s.face.log.Info("bad QTC packet from client", "client", s.client, "err", err)
 		return
 	}
-	if e.Type() == envelope.TypeROOM {
+	if s.qtcMode && pf.src.IsStandard() {
+		s.face.setNative(pf.src, true)
+		if e.Kind() != envelope.KindROOM {
+			s.ingestNative(pf, e)
+			return
+		}
+	}
+	if e.Kind() == envelope.KindROOM {
 		reply, err := s.face.core.inetRoom(pf.src, e)
 		if err != nil {
 			s.face.log.Info("ROOM request rejected", "client", s.client, "err", err)
@@ -885,7 +909,7 @@ func (s *inetSession) readUpstream() {
 		if s.qtcMode && string(b[:4]) == magicM17P {
 			if pf, err := parsePacketDatagram(b); err == nil {
 				switch pf.typ {
-				case envelope.TypeSMS, envelope.TypeMSG, envelope.TypeRCPT, envelope.TypeROOM:
+				case envelope.TypeSMS, envelope.TypeQTC:
 					s.face.log.Debug("dropping upstream messaging packet on qtc module", "type", pf.typ, "src", pf.src)
 					continue
 				}
@@ -895,24 +919,29 @@ func (s *inetSession) readUpstream() {
 	}
 }
 
-// deliver sends a MSG to a device as SMS through the session that heard it.
-// Receipts are dropped for legacy clients (envelope §6).
-func (f *inetFace) deliver(device envelope.Address, e *envelope.Envelope) bool {
+// deliver sends a MSG or RCPT to a device through the session that heard
+// it: to a native device as a QTC payload (native.go), to a legacy one as
+// SMS, with receipts dropped (envelope §6).
+func (f *inetFace) deliver(device envelope.Address, e *envelope.Envelope) deliverResult {
 	f.mu.Lock()
 	s := f.devices[device]
+	native := f.native[device]
 	f.mu.Unlock()
 	if s == nil {
 		f.log.Debug("no link to device", "device", device)
-		return false
+		return deliverNone
 	}
-	if e.Type() != envelope.TypeMSG {
+	if native {
+		return s.deliverNative(device, e)
+	}
+	if e.Kind() != envelope.KindMSG {
 		f.log.Debug("receipt not delivered to legacy client", "device", device, "envelope", e)
-		return true
+		return deliverSent
 	}
 	sms, err := envelope.ToSMS(e)
 	if err != nil {
 		f.log.Warn("cannot send as SMS", "device", device, "envelope", e, "err", err)
-		return true
+		return deliverSent
 	}
 	dst := e.Destination()
 	if name, ok := dst.RoomName(); ok {
@@ -925,5 +954,5 @@ func (f *inetFace) deliver(device envelope.Address, e *envelope.Envelope) bool {
 	}
 	f.log.Info("delivering SMS to client", "client", s.client, "device", device, "envelope", e)
 	f.send(s.client, buildPacketDatagram(dst, e.Source(), sms))
-	return true
+	return deliverSent
 }

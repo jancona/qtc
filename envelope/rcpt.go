@@ -12,14 +12,14 @@ type Rcpt struct{ e *Envelope }
 func (r Rcpt) Envelope() *Envelope { return r.e }
 
 // MessageID is the ID of the message the receipt is about.
-func (r Rcpt) MessageID() ID { return IDFromBytes(r.e.raw[15:23]) }
+func (r Rcpt) MessageID() ID { return IDFromBytes(r.e.raw[16:24]) }
 
 // Status is the receipt status (§5.2).
-func (r Rcpt) Status() Status { return Status(r.e.raw[23]) }
+func (r Rcpt) Status() Status { return Status(r.e.raw[24]) }
 
 // LastHeard is when the issuing node last heard the recipient; 0 = never or
 // not applicable.
-func (r Rcpt) LastHeard() uint32 { return binary.BigEndian.Uint32(r.e.raw[28:32]) }
+func (r Rcpt) LastHeard() uint32 { return binary.BigEndian.Uint32(r.e.raw[29:33]) }
 
 // Note is the optional text, typically a rejection reason.
 func (r Rcpt) Note() string { return string(r.e.raw[RcptHeaderLen:r.e.sigStart()]) }
@@ -31,15 +31,15 @@ func BuildRcpt(src, dst Address, id ID, status Status, timestamp, lastHeard uint
 		return nil, fmt.Errorf("envelope: note of %d bytes exceeds %d", len(note), MaxPayload-RcptHeaderLen)
 	}
 	raw := make([]byte, RcptHeaderLen, RcptHeaderLen+len(note))
-	raw[0] = byte(TypeRCPT)
-	raw[1] = Version0
-	raw[2] = 0
-	src.put(raw[3:9])
-	dst.put(raw[9:15])
-	copy(raw[15:23], id[:])
-	raw[23] = byte(status)
-	binary.BigEndian.PutUint32(raw[24:28], timestamp)
-	binary.BigEndian.PutUint32(raw[28:32], lastHeard)
+	raw[offType] = byte(TypeQTC)
+	raw[offKind] = byte(KindRCPT)
+	raw[offVersion] = Version0
+	src.put(raw[4:10])
+	dst.put(raw[10:16])
+	copy(raw[16:24], id[:])
+	raw[24] = byte(status)
+	binary.BigEndian.PutUint32(raw[25:29], timestamp)
+	binary.BigEndian.PutUint32(raw[29:33], lastHeard)
 	raw = append(raw, note...)
 	return Parse(raw)
 }

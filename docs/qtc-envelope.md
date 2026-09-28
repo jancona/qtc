@@ -3,7 +3,7 @@
 *Part of QTC: An M17 Messaging System*
 
 **Status:** Draft 0.1 — for discussion
-**Scope:** Client ↔ node message and receipt packet types
+**Scope:** The QTC packet type, and its message and receipt kinds
 
 ## Terminology
 
@@ -17,7 +17,7 @@ This document is part of **QTC: An M17 Messaging System**. Throughout the QTC sp
 
 ## 1. Purpose
 
-This document defines two M17 packet mode payload types for store-and-forward text messaging:
+This document defines the QTC M17 packet mode payload type and two of its kinds, for store-and-forward text messaging:
 
 - **MSG** — a text message with the metadata needed to identify, deduplicate, expire, and (optionally) sign it.
 - **RCPT** — a receipt reporting the status of a previously sent MSG.
@@ -33,16 +33,27 @@ The existing SMS type (0x05) remains valid. Nodes translate between SMS and MSG 
 - "Callsign" means a 48-bit M17 base-40 encoded address as defined in the M17 specification.
 - "Room" means an address in the M17 Extended address range (`0xEE6B28000000`–`0xFFFFFFFFFFFE`, which the M17 specification sets aside for application use). How room names are encoded into that range is defined in the Rooms specification.
 - "Payload" means the packet mode contents including the packet type byte and excluding the trailing CRC-16, which the framing layer adds and strips. All offsets in this document are from the type byte.
+- "Kind" is the byte after the packet type that says what kind of QTC packet it is (§3).
 - The maximum payload is 823 bytes.
 
-## 3. Packet Types
+## 3. Packet Type and Kinds
 
-| Name | Value  | Description |
-|------|--------|-------------|
-| MSG  | `0x08` | Text message envelope (§4) |
-| RCPT | `0x09` | Message receipt (§5) |
+QTC uses one M17 packet type, **QTC** (`0x08`). The byte after it is the **Kind**:
 
-These values are provisional. The M17 specification assigns `0x00`–`0x06`, and the 3.0.0 draft assigns `0x07` (TLE); `0x08` and `0x09` are the next unassigned values and will be proposed to the M17 working group once the design is further along. Implementations should keep the values easy to change until then. The M17 packet type specifier is formally a UTF-8-style variable-length integer; values below 128 occupy one byte, so all QTC types are single bytes.
+| Kind   | Name | Defined in |
+|-------:|------|------------|
+| `0x00` | —    | reserved |
+| `0x01` | MSG  | §4 |
+| `0x02` | RCPT | §5 |
+| `0x03` | ROOM | Rooms §5 |
+| `0x04` | SYNC | Native Clients §5 |
+| `0x05` | ACK  | Native Clients §4.1 |
+
+A receiver ignores a kind it does not know, so kinds can be added without a new packet type.
+
+The packet type value is provisional. The M17 specification assigns `0x00`–`0x06`, and the 3.0.0 draft assigns `0x07` (TLE); `0x08` is the next unassigned value and will be proposed to the M17 working group once the design is further along. Implementations should keep the value easy to change until then. The M17 packet type specifier is formally a UTF-8-style variable-length integer; values below 128 occupy one byte.
+
+**Signing input.** Every QTC signature (§4.6, §5.4) covers the ASCII string `QTC` (`51 54 43`) and the Kind byte, followed by the packet from Version to the end of its signed fields with the SIGNED flag cleared. Neither the string nor a second Kind byte is transmitted. The Kind makes a signature for one kind invalid for any other, whose layouts might otherwise parse the same bytes; the string separates QTC signatures from anything else the same key signs, such as M17 voice or mailbox records (Node Protocol §4).
 
 ## 4. MSG — Message Envelope
 
@@ -50,18 +61,19 @@ These values are provisional. The M17 specification assigns `0x00`–`0x06`, and
 
 | Offset | Size | Field       | Description |
 |-------:|-----:|-------------|-------------|
-| 0      | 1    | Type        | Packet type = MSG |
-| 1      | 1    | Version     | Envelope version. This document defines version `0x00`. |
-| 2      | 1    | Flags       | See §4.2 |
-| 3      | 6    | Source      | Sender callsign |
-| 9      | 6    | Destination | Recipient callsign or room |
-| 15     | 4    | Timestamp   | Origin time, unsigned seconds since the Unix epoch |
-| 19     | 2    | TTL         | Time to live in minutes (§4.4) |
-| 21     | 2    | Nonce       | Random value chosen by the sender (§4.3) |
-| 23     | var  | Body        | UTF-8 text, no terminator (§4.5) |
+| 0      | 1    | Type        | Packet type = QTC (`0x08`) |
+| 1      | 1    | Kind        | MSG (`0x01`) |
+| 2      | 1    | Version     | Envelope version. This document defines version `0x00`. |
+| 3      | 1    | Flags       | See §4.2 |
+| 4      | 6    | Source      | Sender callsign |
+| 10     | 6    | Destination | Recipient callsign or room |
+| 16     | 4    | Timestamp   | Origin time, unsigned seconds since the Unix epoch |
+| 20     | 2    | TTL         | Time to live in minutes (§4.4) |
+| 22     | 2    | Nonce       | Random value chosen by the sender (§4.3) |
+| 24     | var  | Body        | UTF-8 text, no terminator (§4.5) |
 | end−64 | 64   | Signature   | Present only if the SIGNED flag is set (§4.6) |
 
-Fixed header length is 23 bytes. Body length is implicit: everything after the header, minus the signature if present.
+Fixed header length is 24 bytes. Body length is implicit: everything after the header, minus the signature if present.
 
 ### 4.2 Flags
 
@@ -83,7 +95,7 @@ The message ID is not transmitted. It is **derived** from the envelope contents:
 MessageID = SHA-256(Version ‖ Flags' ‖ Source ‖ Destination ‖ Timestamp ‖ TTL ‖ Nonce ‖ Body)[0:8]
 ```
 
-where `Flags'` is the Flags byte with the SIGNED bit cleared. The signature is excluded, so a message has the same ID whether or not it is signed, and a node may strip a signature when delivering to a client that does not understand it without changing the ID.
+where `Flags'` is the Flags byte with the SIGNED bit cleared. The Type and Kind bytes are excluded, as is the signature, so a message has the same ID whether or not it is signed, and a node may strip a signature when delivering to a client that does not understand it without changing the ID.
 
 Rationale:
 
@@ -108,13 +120,13 @@ In no case may a node alter the envelope, since that would change the message ID
 
 ### 4.5 Body
 
-UTF-8 encoded text. No terminator; length is implicit. Maximum length is 800 bytes unsigned, 736 bytes signed. Clients should count bytes, not characters, when enforcing limits.
+UTF-8 encoded text. No terminator; length is implicit. Maximum length is 799 bytes unsigned, 735 bytes signed. Clients should count bytes, not characters, when enforcing limits.
 
 The body should not contain leading or trailing whitespace; nodes may trim it when translating from SMS (§6) but must not modify a MSG body.
 
 ### 4.6 Signature
 
-When SIGNED is set, the last 64 bytes of the payload are a signature over exactly the bytes hashed in §4.3 (the same input as the message ID). The algorithm is ECDSA on secp256r1, matching M17 stream signing (M17 specification §3.2.5), so that one key pair serves both voice and messaging. The message digest is SHA-256 of the canonical bytes, i.e. the same hash from which the message ID is taken. The signature is encoded as the raw concatenation `r ‖ s`, each a 32-byte big-endian integer; DER encoding is not used. Signers without a trustworthy entropy source (radios in particular) should use deterministic nonce generation (RFC 6979), since ECDSA leaks the private key on nonce reuse; a hedged construction that mixes RFC 6979 with randomness is equally acceptable. Verifiers must accept any valid signature and must not expect to reproduce one; interoperability is tested by verification, not by byte-equality of signatures.
+When SIGNED is set, the last 64 bytes of the payload are a signature over the signing input of §3: `"QTC" ‖ Kind ‖` the bytes hashed in §4.3. The algorithm is ECDSA on secp256r1, matching M17 stream signing (M17 specification §3.2.5), so that one key pair serves both voice and messaging. The message digest is SHA-256 of the signing input; because of the prefix, it is not the hash from which the message ID is taken. The signature is encoded as the raw concatenation `r ‖ s`, each a 32-byte big-endian integer; DER encoding is not used. Signers without a trustworthy entropy source (radios in particular) should use deterministic nonce generation (RFC 6979), since ECDSA leaks the private key on nonce reuse; a hedged construction that mixes RFC 6979 with randomness is equally acceptable. Verifiers must accept any valid signature and must not expect to reproduce one; interoperability is tested by verification, not by byte-equality of signatures.
 
 Key discovery and trust are out of scope for this document. A node or client that cannot verify a signature must treat the message as unsigned rather than rejecting it, unless local policy requires signatures from that source.
 
@@ -128,16 +140,17 @@ A MSG whose Destination is a room is delivered to every client subscribed to tha
 
 | Offset | Size | Field       | Description |
 |-------:|-----:|-------------|-------------|
-| 0      | 1    | Type        | Packet type = RCPT |
-| 1      | 1    | Version     | `0x00` |
-| 2      | 1    | Flags       | Bit 0 = SIGNED; other bits reserved |
-| 3      | 6    | Source      | Callsign issuing the receipt (a client or a node) |
-| 9      | 6    | Destination | Source callsign of the original message |
-| 15     | 8    | Message ID  | ID of the original message (§4.3) |
-| 23     | 1    | Status      | See §5.2 |
-| 24     | 4    | Timestamp   | Time the status was reached |
-| 28     | 4    | Last heard  | When the issuing node last heard the recipient callsign; `0` = never or not applicable |
-| 32     | var  | Note        | Optional UTF-8 text, typically a rejection reason |
+| 0      | 1    | Type        | Packet type = QTC (`0x08`) |
+| 1      | 1    | Kind        | RCPT (`0x02`) |
+| 2      | 1    | Version     | `0x00` |
+| 3      | 1    | Flags       | Bit 0 = SIGNED; other bits reserved |
+| 4      | 6    | Source      | Callsign issuing the receipt (a client or a node) |
+| 10     | 6    | Destination | Source callsign of the original message |
+| 16     | 8    | Message ID  | ID of the original message (§4.3) |
+| 24     | 1    | Status      | See §5.2 |
+| 25     | 4    | Timestamp   | Time the status was reached |
+| 29     | 4    | Last heard  | When the issuing node last heard the recipient callsign; `0` = never or not applicable |
+| 33     | var  | Note        | Optional UTF-8 text, typically a rejection reason |
 | end−64 | 64   | Signature   | Present only if SIGNED |
 
 ### 5.2 Status Codes
@@ -155,7 +168,7 @@ A MSG whose Destination is a room is delivered to every client subscribed to tha
 
 - Receipts never generate receipts.
 - A receipt may be signed (§5.4); DELIVERED by the recipient's key once user keys exist, TRANSMITTED/QUEUED/EXPIRED by the node's key.
-- QUEUED, TRANSMITTED, EXPIRED, and DELIVERED are sent only if RCPT_REQ was set. REJECTED may always be sent. This governs receipts to the sender. Separately, a node may store delivery records in the recipient's own mailbox (Node Protocol §7.6): RCPTs addressed to the recipient, marked by their note, used only between nodes and never delivered as receipts.
+- QUEUED, TRANSMITTED, EXPIRED, and DELIVERED are sent only if RCPT_REQ was set. REJECTED may always be sent. A native device returns DELIVERED to its node for every MSG addressed to a callsign, as its acknowledgement (Native Clients §4.2); the node passes it on to the sender only if RCPT_REQ was set. This governs receipts to the sender. Separately, a node may store delivery records in the recipient's own mailbox (Node Protocol §7.6): RCPTs addressed to the recipient, marked by their note, used only between nodes and never delivered as receipts.
 - A receipt's Source is the callsign of whoever observed the status: the node's callsign for QUEUED, TRANSMITTED, and EXPIRED; the recipient's callsign for DELIVERED.
 - A message may produce both TRANSMITTED (from the node) and DELIVERED (from a client that speaks MSG). A legacy radio produces only TRANSMITTED.
 - Receipts are best-effort. Nodes may store them for delivery back to the sender, but not beyond the original message's expiry.
@@ -163,7 +176,7 @@ A MSG whose Destination is a room is delivered to every client subscribed to tha
 
 ### 5.4 Signature
 
-When SIGNED is set, the last 64 bytes of the payload are a signature, in the form of §4.6, over the bytes from Version through the end of the Note with the SIGNED bit cleared in Flags (i.e. the same shape as the MSG signing input, with the Type byte excluded). Receipts have no message ID of their own and are never deduplicated by content.
+When SIGNED is set, the last 64 bytes of the payload are a signature, in the form of §4.6, over the signing input of §3: `"QTC" ‖ Kind ‖` the bytes from Version through the end of the Note, with the SIGNED bit cleared in Flags. Receipts have no message ID of their own and are never deduplicated by content.
 
 ## 6. Interoperation with SMS (0x05)
 
@@ -190,15 +203,16 @@ A MSG from N1ADJ to W1AW, 24-hour TTL, delivery receipt requested, unsigned:
 
 ```
 Offset  Bytes                          Field
-0       08                             Type = MSG
-1       00                             Version 0
-2       02                             Flags: RCPT_REQ
-3       00 00 01 8A 92 AE              Source: N1ADJ
-9       00 00 00 16 80 B7              Destination: W1AW
-15      6A A3 ED 40                    Timestamp: 2026-09-11 12:00:00 UTC
-19      05 A0                          TTL: 1440 minutes
-21      3C 7F                          Nonce
-23      48 69 20 4A 69 6D ...          Body: "Hi Jim, testing the new envelope."
+0       08                             Type = QTC
+1       01                             Kind = MSG
+2       00                             Version 0
+3       02                             Flags: RCPT_REQ
+4       00 00 01 8A 92 AE              Source: N1ADJ
+10      00 00 00 16 80 B7              Destination: W1AW
+16      6A A3 ED 40                    Timestamp: 2026-09-11 12:00:00 UTC
+20      05 A0                          TTL: 1440 minutes
+22      3C 7F                          Nonce
+24      48 69 20 4A 69 6D ...          Body: "Hi Jim, testing the new envelope."
 ```
 
 The message ID is `SHA-256(00 02 0000018A92AE 0000001680B7 6AA3ED40 05A0 3C7F "Hi Jim, …")[0:8]` = `CBA5C5C74EAEBF72`. This example, with many others, is in `qtc-fixtures.json`; all values there are generated by an independent reference implementation (`qtc-fixtures-gen.py`).
@@ -211,11 +225,13 @@ None at present.
 
 ## 9. Resolved
 
-- **Packet type values:** provisionally `0x08` (MSG) and `0x09` (RCPT), the next unassigned values after `0x00`–`0x07` (verified against the M17 specification `main` and 3.0.0 `dev` sources, September 2026). Formal assignment deferred until the design is further along.
+- **Packet type value:** provisionally `0x08` (QTC), the next unassigned value after `0x00`–`0x07` (verified against the M17 specification `main` and 3.0.0 `dev` sources, September 2026). Formal assignment deferred until the design is further along.
+- **One packet type:** QTC asks the working group for a single packet type, with the kind of QTC packet in the byte after it (§3), rather than a type per kind.
+- **Signature domain:** signatures cover `"QTC" ‖ Kind` ahead of the signed fields (§3), so a signature is valid for exactly one kind and is distinct from anything else the key signs. Message IDs do not include the prefix.
 - **Derived vs. transmitted message ID:** derived. The envelope is immutable end to end (§4.4); anything a node needs to add goes in the node-to-node wrapper.
 - **Node-issued DELIVERED:** replaced by a distinct TRANSMITTED status carrying the recipient's last-heard time. DELIVERED is client-only.
 - **READ receipts:** omitted from v0. Flag bit 2 and status `0x03` are reserved so they can be added later without a version bump.
 - **Default TTL:** 7 days. Nodes may configure a different default or cap.
-- **Fragmentation:** not supported in v0; a single packet (800 bytes unsigned, 736 signed) is the message size limit. The FRAGMENT flag stays reserved in case that ever changes.
+- **Fragmentation:** not supported in v0; a single packet (799 bytes unsigned, 735 signed) is the message size limit. The FRAGMENT flag stays reserved in case that ever changes.
 - **Room encoding:** out of scope. This document only requires that a room destination lie in the M17 reserved address range; the encoding, naming, and subscription semantics belong in a separate rooms specification.
 - **Signature algorithm:** ECDSA secp256r1, per M17 specification §3.2.5, raw `r ‖ s` encoding (§4.6).

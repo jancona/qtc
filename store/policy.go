@@ -38,8 +38,8 @@ func (p Policy) defaultTTL() uint16 {
 // Expiry decides whether an envelope may be stored at time now and, if so,
 // when it expires. A refusal is a *PutError with the ID left zero.
 func (p Policy) Expiry(e *envelope.Envelope, now uint32) (uint32, error) {
-	switch e.Type() {
-	case envelope.TypeMSG:
+	switch e.Kind() {
+	case envelope.KindMSG:
 		m, _ := e.Msg()
 		ttl := m.TTL()
 		switch {
@@ -64,14 +64,14 @@ func (p Policy) Expiry(e *envelope.Envelope, now uint32) (uint32, error) {
 			return 0, &PutError{Code: CodeExpired, Reason: fmt.Sprintf("expired at %d", exp)}
 		}
 		return exp, nil
-	case envelope.TypeRCPT:
+	case envelope.KindRCPT:
 		return now + uint32(p.defaultTTL())*60, nil
-	case envelope.TypeROOM:
+	case envelope.KindROOM:
 		r := p.RoomRetention
 		if r == 0 {
 			r = DefaultRoomRetention
 		}
 		return now + r, nil
 	}
-	return 0, &PutError{Code: CodeInvalid, Reason: fmt.Sprintf("packet type %s", e.Type())}
+	return 0, &PutError{Code: CodeInvalid, Reason: fmt.Sprintf("kind %s is not stored", e.Kind())}
 }

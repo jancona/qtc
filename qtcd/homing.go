@@ -227,7 +227,7 @@ func (r *Station) sweepSince(h *homed, from int64) bool {
 	var local map[envelope.ID]bool
 	if r.mem != nil {
 		// This station's own mailbox is a member too.
-		recs, _, _, err := r.mem.Query(h.base, since, store.MaxLimit, []envelope.PacketType{envelope.TypeMSG, envelope.TypeRCPT, envelope.TypeROOM})
+		recs, _, _, err := r.mem.Query(h.base, since, store.MaxLimit, []envelope.Kind{envelope.KindMSG, envelope.KindRCPT, envelope.KindROOM})
 		if err == nil {
 			reached++
 			local = map[envelope.ID]bool{}
@@ -283,16 +283,16 @@ func (r *Station) sweepSince(h *homed, from int64) bool {
 	var replay []*envelope.Envelope
 	for _, sid := range order {
 		e := union[sid]
-		switch e.Type() {
-		case envelope.TypeROOM:
+		switch e.Kind() {
+		case envelope.KindROOM:
 			if err := r.subs.Apply(h.base, e); err != nil {
 				r.log.Debug("stored ROOM envelope not applied", "callsign", h.base, "err", err)
 			}
-		case envelope.TypeMSG:
+		case envelope.KindMSG:
 			if !delivered[e.ID()] {
 				replay = append(replay, e)
 			}
-		case envelope.TypeRCPT:
+		case envelope.KindRCPT:
 			r.deliverLocal(e)
 		}
 	}
@@ -308,8 +308,8 @@ func (r *Station) sweepSince(h *homed, from int64) bool {
 // a callsign this node watches.
 func (r *Station) onStored(callsign envelope.Address, e *envelope.Envelope, from peer.ID) {
 	r.log.Debug("event", "callsign", callsign, "member", from, "envelope", e)
-	switch e.Type() {
-	case envelope.TypeROOM:
+	switch e.Kind() {
+	case envelope.KindROOM:
 		if err := r.subs.Apply(callsign, e); err != nil {
 			r.log.Debug("ROOM event not applied", "callsign", callsign, "err", err)
 		}
@@ -371,7 +371,7 @@ func (r *Station) targets(e *envelope.Envelope) []envelope.Address {
 func (r *Station) deliverOne(e *envelope.Envelope, d envelope.Address, now uint32) bool {
 	k := deliveryKey{id: e.StoreID(), device: d}
 	if !r.reachable(d, now) {
-		if e.Type() == envelope.TypeMSG && !r.delivered.has(k) {
+		if e.Kind() == envelope.KindMSG && !r.delivered.has(k) {
 			r.hold(d, e)
 		}
 		return false
@@ -379,14 +379,19 @@ func (r *Station) deliverOne(e *envelope.Envelope, d envelope.Address, now uint3
 	if !r.delivered.mark(k, now) {
 		return false
 	}
-	if !r.deliverTo(d, e) {
+	switch r.deliverTo(d, e) {
+	case deliverNone:
 		// Marked first so concurrent paths cannot both send; undone
 		// because nothing was sent.
 		r.delivered.forget(k)
-		if e.Type() == envelope.TypeMSG {
+		if e.Kind() == envelope.KindMSG {
 			r.hold(d, e)
 		}
 		return false
+	case deliverPending:
+		// A native device: recorded when it acknowledges (inetAcked), or
+		// held if it never does (inetLost).
+		return true
 	}
 	if m, ok := e.Msg(); ok {
 		r.recordDelivery(e, d, envelope.StatusTransmitted, recordTransmitted, now)
@@ -480,6 +485,14 @@ func (r *Station) replay(base envelope.Address, msgs []*envelope.Envelope, now u
 			r.hold(d, list[0])
 			continue
 		}
+		if r.inet != nil && r.inet.isNative(d) {
+			// A native device fetches its backlog with SYNC when it
+			// chooses; it is told how much is waiting (client spec §5.3).
+			if !r.inet.notify(d, len(list)) {
+				r.hold(d, list[0])
+			}
+			continue
+		}
 		sort.SliceStable(list, func(i, j int) bool { return list[i].Timestamp() < list[j].Timestamp() })
 		skipped := 0
 		if n := len(list) - r.cfg.ReplayLimit; n > 0 {
@@ -544,8 +557,8 @@ func (r *Station) issueReceipt(msg *envelope.Envelope, status envelope.Status, l
 // join. A RCPT goes to its destination's mailbox. ROOM requests are answered
 // with HandleRoom, not Send.
 func (r *Station) Send(e *envelope.Envelope) error {
-	switch e.Type() {
-	case envelope.TypeMSG:
+	switch e.Kind() {
+	case envelope.KindMSG:
 		m, _ := e.Msg()
 		dst := e.Destination()
 		switch {
@@ -585,11 +598,11 @@ func (r *Station) Send(e *envelope.Envelope) error {
 			return nil
 		}
 		return fmt.Errorf("qtcd: cannot send to %s", dst)
-	case envelope.TypeRCPT:
+	case envelope.KindRCPT:
 		r.mailbox.putAll(e.Destination().Base(), e, nil)
 		return nil
 	}
-	return fmt.Errorf("qtcd: Send does not accept %s", e.Type())
+	return fmt.Errorf("qtcd: Send does not accept %s", e.Kind())
 }
 
 // HandleRoom processes a ROOM request from a local device and returns the
@@ -637,7 +650,7 @@ func (r *Station) fullHistory(ctx context.Context, base envelope.Address, member
 		}
 	}
 	if r.mem != nil {
-		recs, _, _, err := r.mem.Query(base, 0, store.MaxLimit, []envelope.PacketType{envelope.TypeMSG, envelope.TypeRCPT, envelope.TypeROOM})
+		recs, _, _, err := r.mem.Query(base, 0, store.MaxLimit, []envelope.Kind{envelope.KindMSG, envelope.KindRCPT, envelope.KindROOM})
 		if err == nil {
 			for _, rec := range recs {
 				union[rec.ID()] = rec.Env

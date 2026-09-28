@@ -28,7 +28,7 @@ func FromSMS(sms []byte, src, dst Address, timestamp uint32, ttl, nonce uint16) 
 func ToSMS(e *Envelope) ([]byte, error) {
 	m, ok := e.Msg()
 	if !ok {
-		return nil, fmt.Errorf("envelope: cannot convert %s to SMS", e.Type())
+		return nil, fmt.Errorf("envelope: cannot convert %s to SMS", e.Kind())
 	}
 	body := m.Body()
 	out := make([]byte, 0, len(body)+2)

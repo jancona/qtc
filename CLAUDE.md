@@ -22,12 +22,13 @@ Reasoning is in the docs. Do not "simplify" these away.
 - No `@ALL`. Node-callsign rooms replace it. Explicit LEAVE is sticky.
 - Legacy SMS radios are terminals: no sync. Invest in the native envelope path instead. The one exception, decided 2026-09-27: stations share delivery records through the recipient's mailbox (node protocol §7.6), so a radio moving between hotspots is not replayed messages it already had. Keep that mechanism minimal.
 - No confidentiality. TLS authenticates nodes; content is plaintext. Never say "encrypted".
-- Packet types `0x08` MSG, `0x09` RCPT, `0x0A` ROOM are provisional; `0x07` is TLE in M17 3.0.0 and must not be used. Keep them as named constants in one place.
+- QTC is one M17 packet type, `0x08` (provisional), with a Kind byte after it: MSG, RCPT, ROOM, SYNC, ACK (`envelope/types.go`). Don't ask the working group for more packet types; add kinds. `0x07` is TLE in M17 3.0.0 and must not be used.
+- Signatures cover `"QTC" ‖ Kind ‖` the signed fields; mailbox records sign under `"QTC-record"`. Message IDs exclude Type and Kind.
 
 ## Layout
 
 ```
-envelope/   MSG/RCPT/ROOM parsing, IDs, signatures, addresses and room name encoding. stdlib only.
+envelope/   QTC packet kinds (MSG/RCPT/ROOM/SYNC/ACK): parsing, IDs, signatures, addresses and room name encoding. stdlib only.
 store/      JSON Lines put/query/watch protocol, client and server. stdlib + envelope.
 qtcd/       the daemon as a library, one flat package: subscriptions, M17_inet proxy side, libp2p side, homing, sweeps, home station.
 cmd/qtcd/   daemon binary: config, flags, signals, wiring.   cmd/qtc/  CLI (decode, keys, fixtures, store client).

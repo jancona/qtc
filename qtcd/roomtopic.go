@@ -107,7 +107,7 @@ func (rt *roomTopics) receive(room envelope.Address, sub *pubsub.Subscription) {
 			rt.r.log.Debug("bad room message", "room", room, "from", m.GetFrom(), "err", err)
 			continue
 		}
-		if e.Type() != envelope.TypeMSG || e.Destination() != room {
+		if e.Kind() != envelope.KindMSG || e.Destination() != room {
 			rt.r.log.Debug("room message for wrong room", "room", room, "envelope", e)
 			continue
 		}

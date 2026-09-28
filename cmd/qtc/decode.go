@@ -110,7 +110,7 @@ func readEnvelopeArg(arg string) ([]byte, error) {
 
 func describe(e *envelope.Envelope, pub *ecdsa.PublicKey) decoded {
 	d := decoded{
-		Type:      e.Type().String(),
+		Type:      e.Kind().String(),
 		Length:    e.Len(),
 		Version:   int(e.Version()),
 		Flags:     fmt.Sprintf("0x%02x", e.Flags()),
@@ -118,7 +118,7 @@ func describe(e *envelope.Envelope, pub *ecdsa.PublicKey) decoded {
 		StoreID:   e.StoreID().String(),
 		Signed:    e.Signed(),
 	}
-	if e.Type() != envelope.TypeROOM {
+	if e.Kind() != envelope.KindROOM {
 		d.Source, d.Destination = e.Source().String(), e.Destination().String()
 	}
 	if m, ok := e.Msg(); ok {

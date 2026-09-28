@@ -25,7 +25,7 @@ import (
 // runStore talks the storage protocol to a mailbox node:
 //
 //	qtc store put   -peer ADDR -callsign CALL <envelope hex|base64|->
-//	qtc store query -peer ADDR -callsign CALL [-since T] [-types MSG,RCPT,ROOM]
+//	qtc store query -peer ADDR -callsign CALL [-since T] [-kinds MSG,RCPT,ROOM]
 //	qtc store watch -peer ADDR -callsign CALL[,CALL...]
 func runStore(args []string) error {
 	if len(args) == 0 {
@@ -36,7 +36,7 @@ func runStore(args []string) error {
 	peerAddr := fs.String("peer", "", "mailbox node multiaddr with /p2p/<ID>")
 	callsign := fs.String("callsign", "", "callsign (or #ROOM); watch accepts a comma-separated list")
 	since := fs.Uint("since", 0, "query: received-at time to start from (Unix seconds)")
-	types := fs.String("types", "MSG,RCPT,ROOM", "query: envelope types to fetch")
+	kinds := fs.String("kinds", "MSG,RCPT,ROOM", "query: envelope kinds to fetch")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -78,17 +78,17 @@ func runStore(args []string) error {
 		if err != nil {
 			return err
 		}
-		var ts []envelope.PacketType
-		for _, t := range strings.Split(*types, ",") {
+		var ts []envelope.Kind
+		for _, t := range strings.Split(*kinds, ",") {
 			switch strings.ToUpper(strings.TrimSpace(t)) {
 			case "MSG":
-				ts = append(ts, envelope.TypeMSG)
+				ts = append(ts, envelope.KindMSG)
 			case "RCPT":
-				ts = append(ts, envelope.TypeRCPT)
+				ts = append(ts, envelope.KindRCPT)
 			case "ROOM":
-				ts = append(ts, envelope.TypeROOM)
+				ts = append(ts, envelope.KindROOM)
 			default:
-				return fmt.Errorf("unknown type %q", t)
+				return fmt.Errorf("unknown kind %q", t)
 			}
 		}
 		envs, err := cl.QueryAll(ctx, a, uint32(*since), ts)

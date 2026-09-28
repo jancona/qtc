@@ -136,7 +136,7 @@ func checkFixtures(fx *fixtureFile, report func(section, name, msg string)) (pas
 		if !checkOK(check, "envelopes", f.Name, err == nil, fmt.Sprint(err)) {
 			continue
 		}
-		check("envelopes", f.Name+" type", e.Type().String() == f.Type, e.Type().String())
+		check("envelopes", f.Name+" type", e.Kind().String() == f.Type, e.Kind().String())
 		if f.SigningInput != "" {
 			check("envelopes", f.Name+" signing input", hex.EncodeToString(e.SigningInput()) == f.SigningInput, "mismatch")
 		}

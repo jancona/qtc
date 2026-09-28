@@ -27,6 +27,44 @@ type stubCore struct {
 	relinked []envelope.Address
 	node     envelope.Address
 	local    envelope.Address
+
+	// Native devices.
+	acked      []ackEvent
+	lost       []ackEvent
+	syncPage   []*envelope.Envelope
+	syncReqs   []envelope.Sync
+	subscribed bool
+}
+
+type ackEvent struct {
+	device envelope.Address
+	msg    *envelope.Envelope
+	rcpt   *envelope.Envelope
+	fresh  bool
+}
+
+func (c *stubCore) inetAcked(d envelope.Address, msg, rcpt *envelope.Envelope, fresh bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.acked = append(c.acked, ackEvent{d, msg, rcpt, fresh})
+}
+func (c *stubCore) inetLost(d envelope.Address, msg *envelope.Envelope, fresh bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lost = append(c.lost, ackEvent{device: d, msg: msg, fresh: fresh})
+}
+func (c *stubCore) inetSync(_ envelope.Address, req envelope.Sync, limit int) ([]*envelope.Envelope, uint32, uint16, int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.syncReqs = append(c.syncReqs, req)
+	page := c.syncPage[:min(limit, len(c.syncPage))]
+	return page, 1234, uint16(len(page)), len(c.syncPage) - len(page), nil
+}
+func (c *stubCore) inetReachable(envelope.Address) bool { return true }
+func (c *stubCore) inetSubscribed(envelope.Address, envelope.Address) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.subscribed
 }
 
 func (c *stubCore) inetHeard(d envelope.Address, via Via, _ uint32) error {
@@ -313,15 +351,21 @@ func TestInetFace(t *testing.T) {
 	}
 	core.mu.Unlock()
 
-	// A native MSG packet from the client is ingested; a ROOM packet is
-	// answered with a ROOM reply packet.
-	native := mustMsg(t, ht, w1aw, 1, 60, 9, 0, "native")
-	gateway.sendTo(t, station, buildPacketDatagram(w1aw, ht, native.Bytes()))
+	// A QTC MSG from a device (a native one, not the HT) is ingested and
+	// acknowledged; a ROOM packet is answered with a ROOM reply packet.
+	hn := mustAddr(t, "N1ADJ  N")
+	native := mustMsg(t, hn, w1aw, 1, 60, 9, 0, "native")
+	gateway.sendTo(t, station, buildPacketDatagram(w1aw, hn, native.Bytes()))
 	eventually(t, "MSG ingested", 2*time.Second, func() bool { return core.sentCount() == 4 })
-	gateway.sendTo(t, station, buildPacketDatagram(node, ht, mustRoomPkt(t, envelope.OpList, 0).Bytes()))
 	reply, _ = gateway.expect(t, magicM17P)
 	pf, _ = parsePacketDatagram(reply)
-	if e, err := envelope.Parse(pf.payload); err != nil || e.Type() != envelope.TypeROOM {
+	if e, err := envelope.Parse(pf.payload); err != nil || e.Kind() != envelope.KindACK || pf.dst != hn {
+		t.Errorf("MSG answered with %v %v to %s", e, err, pf.dst)
+	}
+	gateway.sendTo(t, station, buildPacketDatagram(node, hn, mustRoomPkt(t, envelope.OpList, 0).Bytes()))
+	reply, _ = gateway.expect(t, magicM17P)
+	pf, _ = parsePacketDatagram(reply)
+	if e, err := envelope.Parse(pf.payload); err != nil || e.Kind() != envelope.KindROOM {
 		t.Errorf("ROOM reply = %v %v", e, err)
 	}
 
@@ -353,6 +397,9 @@ func TestInetFace(t *testing.T) {
 	gateway.expectNone(t, magicM17P, 200*time.Millisecond)
 
 	// Relink on native module B: SMS passes through both ways, no presence.
+	core.mu.Lock()
+	heardBefore := len(core.heard)
+	core.mu.Unlock()
 	gateway.sendTo(t, station, connDatagram(gwCall, 'B'))
 	conn, upFrom = upstream.expect(t, magicCONN)
 	if conn[10] != 'D' {
@@ -366,7 +413,7 @@ func TestInetFace(t *testing.T) {
 	upstream.expect(t, magicM17S)
 	time.Sleep(100 * time.Millisecond)
 	core.mu.Lock()
-	if len(core.heard) != 1 || len(core.sent) != 4 {
+	if len(core.heard) != heardBefore || len(core.sent) != 4 {
 		t.Errorf("native module published presence or ingested: heard %d sent %d", len(core.heard), len(core.sent))
 	}
 	core.mu.Unlock()
@@ -522,7 +569,7 @@ func TestGatewayRelinkKeepsRadios(t *testing.T) {
 		defer face.mu.Unlock()
 		return len(face.sessions) == 0
 	})
-	if face.deliver(ht, mustMsg(t, w1aw, ht, 1, 60, 1, 0, "while down")) {
+	if face.deliver(ht, mustMsg(t, w1aw, ht, 1, 60, 1, 0, "while down")) != deliverNone {
 		t.Error("delivered with no link")
 	}
 
@@ -540,7 +587,7 @@ func TestGatewayRelinkKeepsRadios(t *testing.T) {
 		defer core.mu.Unlock()
 		return len(core.relinked) == 1 && core.relinked[0] == ht
 	})
-	if !face.deliver(ht, mustMsg(t, w1aw, ht, 1, 60, 2, 0, "after relink")) {
+	if face.deliver(ht, mustMsg(t, w1aw, ht, 1, 60, 2, 0, "after relink")) != deliverSent {
 		t.Fatal("not delivered after relink")
 	}
 	b, _ := gw2.expect(t, magicM17P)

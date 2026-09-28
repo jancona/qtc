@@ -8,6 +8,7 @@ Design, for developers. Read in this order:
 2. `qtc-envelope.md` — MSG/RCPT packet types
 3. `qtc-rooms.md` — rooms and the ROOM packet type
 4. `qtc-node-protocol.md` — node-to-node protocol on libp2p (draft 0.2)
+5. `qtc-client.md` — native clients: the single QTC packet type, acknowledgement, sync (draft 0.1)
 
 `qtc-node-protocol-draft01-custody.md` is the superseded custody-based design, kept for history.
 

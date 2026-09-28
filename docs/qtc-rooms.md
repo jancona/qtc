@@ -3,7 +3,7 @@
 *Part of QTC: An M17 Messaging System*
 
 **Status:** Draft 0.1 — for discussion
-**Scope:** Room addressing, subscription semantics, and the client ↔ node control packet type
+**Scope:** Room addressing, subscription semantics, and the client ↔ node ROOM control kind
 **Depends on:** QTC: Architecture Overview; QTC: Message Envelope (MSG/RCPT)
 
 ## Terminology
@@ -100,19 +100,20 @@ A callsign heard at several nodes has its subscriptions applied at each, all der
 
 ## 5. ROOM — Control Packet
 
-Clients that speak the new protocol manage subscriptions with a dedicated packet type. Control packets are single-hop between a client and its node and are never forwarded, so source and destination come from the packet's LSF rather than the payload.
+Clients that speak the new protocol manage subscriptions with the ROOM kind of the QTC packet type. Control packets are single-hop between a client and its node and are never forwarded, so source and destination come from the packet's LSF rather than the payload.
 
 ### 5.1 Layout
 
 | Offset | Size | Field     | Description |
 |-------:|-----:|-----------|-------------|
-| 0      | 1    | Type      | Packet type = ROOM (`0x0A`, provisional; see Message Envelope §3) |
-| 1      | 1    | Version   | `0x00` |
-| 2      | 1    | Flags     | Bit 0 = SIGNED (reserved; no signature is defined for ROOM in this version); other bits reserved, must be 0 |
-| 3      | 1    | Op        | See §5.2 |
-| 4      | 4    | Timestamp | When the request was made; `0` = unknown (clock-less radio) |
-| 8      | 1    | Count     | Number of 6-byte room addresses that follow |
-| 9      | 6×n  | Rooms     | Room addresses |
+| 0      | 1    | Type      | Packet type = QTC (`0x08`, provisional; see Message Envelope §3) |
+| 1      | 1    | Kind      | ROOM (`0x03`) |
+| 2      | 1    | Version   | `0x00` |
+| 3      | 1    | Flags     | Bit 0 = SIGNED (reserved; no signature is defined for ROOM in this version); other bits reserved, must be 0 |
+| 4      | 1    | Op        | See §5.2 |
+| 5      | 4    | Timestamp | When the request was made; `0` = unknown (clock-less radio) |
+| 9      | 1    | Count     | Number of 6-byte room addresses that follow |
+| 10     | 6×n  | Rooms     | Room addresses |
 | —      | var  | Note      | Optional UTF-8 text following the rooms list; replies only |
 
 The layout is the same for requests and replies. Requests never carry a note.
@@ -144,7 +145,7 @@ Clients that speak only SMS interact with rooms as follows.
 
 **Sending.** An SMS whose LSF Destination is a room address is treated as a MSG to that room (per the Message Envelope specification §6) and implicitly joins the sender. Since most radios cannot enter an Extended address, an SMS to the node's own callsign whose text begins with `#NAME ` is likewise a message to room NAME with the marker and name removed from the body; text with neither `/` nor `#` is a message to the local room.
 
-**Receiving.** Room messages are delivered as SMS addressed to the device, with the text prefixed `#NAME ` so the user can see which room it came from; a legacy radio cannot display an Extended address in the LSF. A node does not deliver a room message back to the device that sent it unless configured to (useful for testing, noise on the air).
+**Receiving.** Room messages are delivered as SMS addressed to the device, with the text prefixed `#NAME ` so the user can see which room it came from; a legacy radio cannot display an Extended address in the LSF. Native devices get the MSG itself, addressed to the room (Native Clients §6). A node does not deliver a room message back to the device that sent it unless configured to (useful for testing, noise on the air).
 
 **Control.** An SMS addressed to the node's own callsign whose text begins with `/` is a command:
 

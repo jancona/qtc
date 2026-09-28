@@ -9,12 +9,12 @@ import (
 )
 
 // Sign returns a signed copy of an unsigned MSG or RCPT (§4.6, §5.4). The
-// signature is ECDSA on secp256r1 over SHA-256 of SigningInput, encoded as
-// raw r‖s. Nonces come from crypto/ecdsa, so two signatures of the same
+// signature is ECDSA on secp256r1 over SHA-256 of SigningInput ("QTC" ‖
+// Kind ‖ the signed fields), encoded as raw r‖s. Nonces come from crypto/ecdsa, so two signatures of the same
 // envelope differ; verify them, never compare them. The message ID is
 // unchanged by signing.
 func (e *Envelope) Sign(priv *ecdsa.PrivateKey) (*Envelope, error) {
-	if e.Type() == TypeROOM {
+	if !e.signable() {
 		return nil, ErrNotSignable
 	}
 	if e.Signed() {
@@ -33,7 +33,7 @@ func (e *Envelope) Sign(priv *ecdsa.PrivateKey) (*Envelope, error) {
 	}
 	raw := make([]byte, 0, len(e.raw)+SignatureLen)
 	raw = append(raw, e.raw...)
-	raw[2] |= FlagSigned
+	raw[offFlags] |= FlagSigned
 	raw = append(raw, make([]byte, SignatureLen)...)
 	r.FillBytes(raw[len(e.raw) : len(e.raw)+32])
 	s.FillBytes(raw[len(e.raw)+32:])
@@ -46,7 +46,7 @@ func (e *Envelope) Sign(priv *ecdsa.PrivateKey) (*Envelope, error) {
 // envelope as unsigned (StripSignature) rather than reject it, unless local
 // policy says otherwise.
 func (e *Envelope) Verify(pub *ecdsa.PublicKey) error {
-	if e.Type() == TypeROOM {
+	if !e.signable() {
 		return ErrNotSignable
 	}
 	sig, ok := e.Signature()

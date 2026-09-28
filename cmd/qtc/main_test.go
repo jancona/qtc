@@ -32,7 +32,7 @@ func TestFixturesChecker(t *testing.T) {
 }
 
 func TestDecodeDescribe(t *testing.T) {
-	raw, _ := hex.DecodeString("0800020000018a92ae0000001680b76aa3ed4005a03c7f4869204a696d2c2074657374696e6720746865206e657720656e76656c6f70652e")
+	raw, _ := hex.DecodeString("080100020000018a92ae0000001680b76aa3ed4005a03c7f4869204a696d2c2074657374696e6720746865206e657720656e76656c6f70652e")
 	e, err := envelope.Parse(raw)
 	if err != nil {
 		t.Fatal(err)
@@ -41,7 +41,7 @@ func TestDecodeDescribe(t *testing.T) {
 	if d.Type != "MSG" || d.ID != "cba5c5c74eaebf72" || d.Body == nil || *d.Body != "Hi Jim, testing the new envelope." || d.Expiry == nil || *d.Expiry != 1789214400 {
 		t.Errorf("describe = %+v", d)
 	}
-	for _, in := range []string{hex.EncodeToString(raw), "CAACAAABipKuAAAAFoC3aqPtQAWgPH9IaSBKaW0sIHRlc3RpbmcgdGhlIG5ldyBlbnZlbG9wZS4="} {
+	for _, in := range []string{hex.EncodeToString(raw), "CAEAAgAAAYqSrgAAABaAt2qj7UAFoDx/SGkgSmltLCB0ZXN0aW5nIHRoZSBuZXcgZW52ZWxvcGUu"} {
 		if got, err := readEnvelopeArg(in); err != nil || hex.EncodeToString(got) != hex.EncodeToString(raw) {
 			t.Errorf("readEnvelopeArg(%.20s) = %x, %v", in, got, err)
 		}

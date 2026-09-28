@@ -244,7 +244,7 @@ func testQueryPagingAndTypes(t *testing.T, mem testStore) {
 	}
 
 	// limit 1 at t0 returns both t0 messages (same second) and points at t0+1.
-	envs, next, more, err := cl.Query(ctx(t), w1aw, 0, 1, []envelope.PacketType{envelope.TypeMSG})
+	envs, next, more, err := cl.Query(ctx(t), w1aw, 0, 1, []envelope.Kind{envelope.KindMSG})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +252,7 @@ func testQueryPagingAndTypes(t *testing.T, mem testStore) {
 		t.Errorf("page 1 = %v more=%v next=%d", got, more, next)
 	}
 	// Querying again from next overlaps by design; page 2 from t0+1 gets the rest.
-	envs, next, more, err = cl.Query(ctx(t), w1aw, t0+1, 2, []envelope.PacketType{envelope.TypeMSG})
+	envs, next, more, err = cl.Query(ctx(t), w1aw, t0+1, 2, []envelope.Kind{envelope.KindMSG})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,12 +264,12 @@ func testQueryPagingAndTypes(t *testing.T, mem testStore) {
 	if envs, _, _, _ = cl.Query(ctx(t), w1aw, 0, 0, nil); len(envs) != 6 {
 		t.Errorf("default types: %d envs, want 6", len(envs))
 	}
-	if envs, _, _, _ = cl.Query(ctx(t), w1aw, 0, 0, []envelope.PacketType{envelope.TypeROOM}); len(envs) != 1 {
+	if envs, _, _, _ = cl.Query(ctx(t), w1aw, 0, 0, []envelope.Kind{envelope.KindROOM}); len(envs) != 1 {
 		t.Errorf("ROOM only: %d envs, want 1", len(envs))
 	}
 
 	// QueryAll unions pages by StoreID.
-	got, err := cl.QueryAll(ctx(t), w1aw, 0, []envelope.PacketType{envelope.TypeMSG, envelope.TypeRCPT, envelope.TypeROOM})
+	got, err := cl.QueryAll(ctx(t), w1aw, 0, []envelope.Kind{envelope.KindMSG, envelope.KindRCPT, envelope.KindROOM})
 	if err != nil || len(got) != 7 {
 		t.Errorf("QueryAll = %d envs, %v; want 7", len(got), err)
 	}
@@ -463,11 +463,11 @@ func TestWireResultShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(b) != `{"type":"RESULT","envs":[],"next":null}` {
+	if string(b) != `{"type":"RESULT","envs":[],"at":[],"next":null}` {
 		t.Errorf("empty RESULT = %s", b)
 	}
 	b, _ = json.Marshal(message{Type: TypePutOK, ID: "00"})
-	if strings.Contains(string(b), "envs") || strings.Contains(string(b), "next") {
+	if strings.Contains(string(b), "envs") || strings.Contains(string(b), `"at"`) || strings.Contains(string(b), "next") {
 		t.Errorf("PUT_OK carries RESULT fields: %s", b)
 	}
 	if _, err := parseID("zz"); err == nil {

@@ -371,17 +371,19 @@ func (r *Station) Presence() *presence { return r.presence }
 
 func unixNow() uint32 { return uint32(time.Now().Unix()) }
 
-// deliverTo hands an envelope to a device and reports whether it went. A
+// deliverTo hands an envelope to a device and reports what happened. A
 // device heard through the M17_inet face needs its gateway or client link
-// up; a device given by config or the admin interface always takes it.
-func (r *Station) deliverTo(device envelope.Address, e *envelope.Envelope) bool {
+// up, and a native one's delivery completes when it acknowledges; a device
+// given by config or the admin interface always takes it.
+func (r *Station) deliverTo(device envelope.Address, e *envelope.Envelope) deliverResult {
+	res := deliverSent
 	if via := r.presence.localVia(device); r.inet != nil && (via == ViaRF || via == ViaInternet) {
-		if !r.inet.deliver(device, e) {
-			return false
+		if res = r.inet.deliver(device, e); res == deliverNone {
+			return res
 		}
 	}
 	r.cfg.Deliver(device, e)
-	return true
+	return res
 }
 
 func (r *Station) runExpiry() {

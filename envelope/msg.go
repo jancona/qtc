@@ -14,11 +14,11 @@ type Msg struct{ e *Envelope }
 func (m Msg) Envelope() *Envelope { return m.e }
 
 // TTL is the time to live in minutes; see TTLLiveOnly and TTLDefault.
-func (m Msg) TTL() uint16 { return binary.BigEndian.Uint16(m.e.raw[19:21]) }
+func (m Msg) TTL() uint16 { return binary.BigEndian.Uint16(m.e.raw[20:22]) }
 
 // Nonce is the sender-chosen 16-bit value that distinguishes otherwise
 // identical messages.
-func (m Msg) Nonce() uint16 { return binary.BigEndian.Uint16(m.e.raw[21:23]) }
+func (m Msg) Nonce() uint16 { return binary.BigEndian.Uint16(m.e.raw[22:24]) }
 
 // Body is the message text. It is not checked for valid UTF-8; a
 // store-and-forward node passes bytes through unchanged.
@@ -54,14 +54,15 @@ func BuildMsg(src, dst Address, timestamp uint32, ttl, nonce uint16, flags byte,
 		return nil, fmt.Errorf("envelope: body of %d bytes exceeds %d", len(body), MaxBodyUnsigned)
 	}
 	raw := make([]byte, MsgHeaderLen, MsgHeaderLen+len(body))
-	raw[0] = byte(TypeMSG)
-	raw[1] = Version0
-	raw[2] = flags
-	src.put(raw[3:9])
-	dst.put(raw[9:15])
-	binary.BigEndian.PutUint32(raw[15:19], timestamp)
-	binary.BigEndian.PutUint16(raw[19:21], ttl)
-	binary.BigEndian.PutUint16(raw[21:23], nonce)
+	raw[offType] = byte(TypeQTC)
+	raw[offKind] = byte(KindMSG)
+	raw[offVersion] = Version0
+	raw[offFlags] = flags
+	src.put(raw[4:10])
+	dst.put(raw[10:16])
+	binary.BigEndian.PutUint32(raw[16:20], timestamp)
+	binary.BigEndian.PutUint16(raw[20:22], ttl)
+	binary.BigEndian.PutUint16(raw[22:24], nonce)
 	raw = append(raw, body...)
 	return Parse(raw)
 }

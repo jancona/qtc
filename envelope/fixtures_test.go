@@ -22,6 +22,10 @@ import (
 type fixtures struct {
 	Version     int               `json:"qtc_fixtures_version"`
 	PacketTypes map[string]int    `json:"packet_types"`
+	Kinds       map[string]int    `json:"kinds"`
+	SigContext  string            `json:"signing_context"`
+	SyncOps     map[string]int    `json:"sync_ops"`
+	SyncFlags   map[string]int    `json:"sync_flags"`
 	Flags       map[string]int    `json:"flags"`
 	RcptStatus  map[string]int    `json:"rcpt_status"`
 	RoomOps     map[string]int    `json:"room_ops"`
@@ -33,6 +37,36 @@ type fixtures struct {
 	RoomPackets []packetFixture   `json:"room_packets"`
 	SMSWrap     smsFixture        `json:"sms_wrap"`
 	Invalid     []invalidFixture  `json:"invalid_envelopes"`
+	CrossKind   struct {
+		Bytes    string `json:"bytes"`
+		Verifies bool   `json:"verifies"`
+	} `json:"cross_kind"`
+	SyncPackets []syncFixture `json:"sync_packets"`
+	AckPackets  []struct {
+		Name  string   `json:"name"`
+		Bytes string   `json:"bytes"`
+		IDs   []string `json:"ids"`
+	} `json:"ack_packets"`
+}
+
+type syncFixture struct {
+	Name   string `json:"name"`
+	Bytes  string `json:"bytes"`
+	Length int    `json:"length"`
+	Fields struct {
+		Version   int    `json:"version"`
+		Flags     int    `json:"flags"`
+		Op        int    `json:"op"`
+		Cursor    uint32 `json:"cursor"`
+		Skip      uint16 `json:"skip"`
+		Count     int    `json:"count"`
+		Remaining uint16 `json:"remaining"`
+		Tail      string `json:"tail"`
+	} `json:"fields"`
+	Groups []struct {
+		Room string   `json:"room"`
+		IDs  []string `json:"ids"`
+	} `json:"groups"`
 }
 
 type addressFixture struct {
@@ -91,6 +125,7 @@ type packetFixture struct {
 		Count       int      `json:"count"`
 		Rooms       []string `json:"rooms"`
 	} `json:"fields"`
+	IDInput      string  `json:"id_input"`
 	SigningInput string  `json:"signing_input"`
 	MessageID    string  `json:"message_id"`
 	Expiry       *uint32 `json:"expiry"`
@@ -128,8 +163,8 @@ func loadFixtures(t *testing.T) *fixtures {
 	if err := json.Unmarshal(b, &fx); err != nil {
 		t.Fatalf("parse fixtures: %v", err)
 	}
-	if fx.Version != 3 {
-		t.Fatalf("fixtures version %d, test written for 3", fx.Version)
+	if fx.Version != 4 {
+		t.Fatalf("fixtures version %d, test written for 4", fx.Version)
 	}
 	return &fx
 }
@@ -180,9 +215,24 @@ func TestFixturesConstants(t *testing.T) {
 			t.Errorf("%s.%s = %d, fixture %d", section, name, got, want)
 		}
 	}
-	check("packet_types", "MSG", int(envelope.TypeMSG), fx.PacketTypes["MSG"])
-	check("packet_types", "RCPT", int(envelope.TypeRCPT), fx.PacketTypes["RCPT"])
-	check("packet_types", "ROOM", int(envelope.TypeROOM), fx.PacketTypes["ROOM"])
+	check("packet_types", "SMS", int(envelope.TypeSMS), fx.PacketTypes["SMS"])
+	check("packet_types", "QTC", int(envelope.TypeQTC), fx.PacketTypes["QTC"])
+	check("kinds", "MSG", int(envelope.KindMSG), fx.Kinds["MSG"])
+	check("kinds", "RCPT", int(envelope.KindRCPT), fx.Kinds["RCPT"])
+	check("kinds", "ROOM", int(envelope.KindROOM), fx.Kinds["ROOM"])
+	check("kinds", "SYNC", int(envelope.KindSYNC), fx.Kinds["SYNC"])
+	check("kinds", "ACK", int(envelope.KindACK), fx.Kinds["ACK"])
+	check("sync_ops", "REQUEST", int(envelope.SyncRequest), fx.SyncOps["REQUEST"])
+	check("sync_ops", "FETCH", int(envelope.SyncFetch), fx.SyncOps["FETCH"])
+	check("sync_ops", "PAGE", int(envelope.SyncPage), fx.SyncOps["PAGE"])
+	check("sync_ops", "NOTIFY", int(envelope.SyncNotify), fx.SyncOps["NOTIFY"])
+	check("sync_ops", "REFUSED", int(envelope.SyncRefused), fx.SyncOps["REFUSED"])
+	check("sync_ops", "SUMMARY", int(envelope.SyncSummary), fx.SyncOps["SUMMARY"])
+	check("sync_flags", "ALL", int(envelope.SyncFlagAll), fx.SyncFlags["ALL"])
+	check("sync_flags", "SENT", int(envelope.SyncFlagSent), fx.SyncFlags["SENT"])
+	if got := hex.EncodeToString([]byte(envelope.SigningContext)); got != fx.SigContext {
+		t.Errorf("signing context %s, fixture %s", got, fx.SigContext)
+	}
 	check("flags", "SIGNED", int(envelope.FlagSigned), fx.Flags["SIGNED"])
 	check("flags", "RCPT_REQ", int(envelope.FlagRcptReq), fx.Flags["RCPT_REQ"])
 	check("rcpt_status", "QUEUED", int(envelope.StatusQueued), fx.RcptStatus["QUEUED"])
@@ -373,8 +423,8 @@ func TestFixturesEnvelopes(t *testing.T) {
 
 func checkCommon(t *testing.T, e *envelope.Envelope, f packetFixture, raw []byte) {
 	t.Helper()
-	if e.Type().String() != f.Type {
-		t.Errorf("Type = %s, want %s", e.Type(), f.Type)
+	if e.Kind().String() != f.Type {
+		t.Errorf("Kind = %s, want %s", e.Kind(), f.Type)
 	}
 	if e.Len() != len(raw) || !bytes.Equal(e.Bytes(), raw) {
 		t.Error("Bytes differs from input")
@@ -400,6 +450,11 @@ func checkCommon(t *testing.T, e *envelope.Envelope, f packetFixture, raw []byte
 		}
 		if got := addrHex(e.Destination()); got != f.Fields.Destination {
 			t.Errorf("Destination = %s, want %s", got, f.Fields.Destination)
+		}
+	}
+	if f.IDInput != "" {
+		if d := sha256.Sum256(unhex(t, f.IDInput)); hex.EncodeToString(d[:envelope.IDLen]) != f.MessageID {
+			t.Errorf("fixture id_input does not hash to message_id %s", f.MessageID)
 		}
 	}
 	if f.SigningInput != "" {
@@ -601,7 +656,7 @@ func checkJSON(t *testing.T, e *envelope.Envelope, raw []byte) {
 // hash of their bytes, so receipts for one message do not collide.
 func checkStoreID(t *testing.T, e *envelope.Envelope, raw []byte) {
 	t.Helper()
-	if e.Type() == envelope.TypeMSG {
+	if e.Kind() == envelope.KindMSG {
 		if e.StoreID() != e.ID() {
 			t.Errorf("StoreID %s != ID %s", e.StoreID(), e.ID())
 		}
@@ -728,6 +783,9 @@ func TestFixturesInvalidEnvelopes(t *testing.T) {
 			if !errors.Is(err, envelope.ErrInvalid) && !errors.Is(err, envelope.ErrUnknownVersion) {
 				t.Errorf("error %v does not wrap ErrInvalid or ErrUnknownVersion", err)
 			}
+			if f.Name == "unknown_kind" && !errors.Is(err, envelope.ErrUnknownKind) {
+				t.Errorf("unknown_kind error = %v, want ErrUnknownKind", err)
+			}
 			if f.Name == "unknown_version" && !errors.Is(err, envelope.ErrUnknownVersion) {
 				t.Errorf("unknown_version error = %v, want ErrUnknownVersion", err)
 			}
@@ -735,6 +793,122 @@ func TestFixturesInvalidEnvelopes(t *testing.T) {
 			j, _ := json.Marshal(base64.StdEncoding.EncodeToString(raw))
 			if err := json.Unmarshal(j, &viaJSON); err == nil {
 				t.Error("UnmarshalJSON accepted an invalid envelope")
+			}
+		})
+	}
+}
+
+// TestFixturesCrossKind: a signed MSG relabelled as RCPT parses, but its
+// signature does not verify, because the signing input carries the Kind.
+func TestFixturesCrossKind(t *testing.T) {
+	fx := loadFixtures(t)
+	priv := testKey(t, fx.TestKey)
+	e, err := envelope.Parse(unhex(t, fx.CrossKind.Bytes))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := e.Rcpt(); !ok || !e.Signed() {
+		t.Fatalf("parsed as %s", e)
+	}
+	if err := e.Verify(&priv.PublicKey); (err == nil) != fx.CrossKind.Verifies {
+		t.Errorf("Verify = %v, fixture says verifies=%v", err, fx.CrossKind.Verifies)
+	}
+}
+
+func TestFixturesSyncPackets(t *testing.T) {
+	fx := loadFixtures(t)
+	if len(fx.SyncPackets) == 0 {
+		t.Fatal("no sync packets")
+	}
+	for _, f := range fx.SyncPackets {
+		t.Run(f.Name, func(t *testing.T) {
+			raw := unhex(t, f.Bytes)
+			e, err := envelope.Parse(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			y, ok := e.Sync()
+			if !ok || e.Len() != f.Length {
+				t.Fatalf("parsed as %s, length %d", e, e.Len())
+			}
+			if int(e.Flags()) != f.Fields.Flags || int(y.Op()) != f.Fields.Op || y.Cursor() != f.Fields.Cursor ||
+				y.Skip() != f.Fields.Skip || y.Count() != f.Fields.Count || y.Remaining() != f.Fields.Remaining {
+				t.Errorf("fields = %s, want %+v", e, f.Fields)
+			}
+			if e.SigningInput() != nil || e.Source() != envelope.AddressZero {
+				t.Error("SYNC has no signing input or addresses")
+			}
+			tail := unhex(t, f.Fields.Tail)
+			var rebuilt *envelope.Envelope
+			switch op := y.Op(); op {
+			case envelope.SyncRefused:
+				if y.Note() != string(tail) {
+					t.Errorf("Note = %q", y.Note())
+				}
+				rebuilt, err = envelope.BuildSyncRefused(y.Note())
+			case envelope.SyncFetch:
+				var got []byte
+				for _, id := range y.ShortIDs() {
+					got = append(got, id[:]...)
+				}
+				if !bytes.Equal(got, tail) {
+					t.Errorf("ShortIDs = %x, want %x", got, tail)
+				}
+				rebuilt, err = envelope.BuildSyncFetch(y.ShortIDs())
+			case envelope.SyncSummary:
+				groups := y.Groups()
+				if len(groups) != len(f.Groups) {
+					t.Fatalf("%d groups, want %d", len(groups), len(f.Groups))
+				}
+				for i, g := range groups {
+					if addrHex(g.Room) != f.Groups[i].Room || len(g.IDs) != len(f.Groups[i].IDs) {
+						t.Errorf("group %d = %s %x", i, g.Room, g.IDs)
+						continue
+					}
+					for j, id := range g.IDs {
+						if hex.EncodeToString(id[:]) != f.Groups[i].IDs[j] {
+							t.Errorf("group %d id %d = %x", i, j, id)
+						}
+					}
+				}
+				rebuilt, err = envelope.BuildSyncSummary(groups)
+			default:
+				if len(tail) != 0 {
+					t.Fatalf("unexpected tail for %s", op)
+				}
+				rebuilt, err = envelope.BuildSync(op, e.Flags(), y.Cursor(), y.Skip(), y.Count(), y.Remaining())
+			}
+			if err != nil || !bytes.Equal(rebuilt.Bytes(), raw) {
+				t.Errorf("rebuilt % x, %v; want % x", rebuilt.Bytes(), err, raw)
+			}
+		})
+	}
+}
+
+func TestFixturesAckPackets(t *testing.T) {
+	fx := loadFixtures(t)
+	for _, f := range fx.AckPackets {
+		t.Run(f.Name, func(t *testing.T) {
+			raw := unhex(t, f.Bytes)
+			e, err := envelope.Parse(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			a, ok := e.Ack()
+			if !ok {
+				t.Fatalf("parsed as %s", e)
+			}
+			ids := a.IDs()
+			if len(ids) != len(f.IDs) {
+				t.Fatalf("%d IDs, want %d", len(ids), len(f.IDs))
+			}
+			for i, id := range ids {
+				if id.String() != f.IDs[i] {
+					t.Errorf("ID %d = %s, want %s", i, id, f.IDs[i])
+				}
+			}
+			if rebuilt, err := envelope.BuildAck(ids); err != nil || !bytes.Equal(rebuilt.Bytes(), raw) {
+				t.Errorf("rebuilt %v, %v", rebuilt, err)
 			}
 		})
 	}

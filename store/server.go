@@ -188,20 +188,21 @@ func (s *Server) query(c *conn, m message) error {
 	if m.Limit != nil && *m.Limit > 0 {
 		limit = min(*m.Limit, MaxLimit)
 	}
-	types := []envelope.PacketType{envelope.TypeMSG, envelope.TypeRCPT}
-	if len(m.Types) > 0 {
+	types := []envelope.Kind{envelope.KindMSG, envelope.KindRCPT}
+	if len(m.Kinds) > 0 {
 		types = types[:0]
-		for _, t := range m.Types {
-			types = append(types, envelope.PacketType(t))
+		for _, t := range m.Kinds {
+			types = append(types, envelope.Kind(t))
 		}
 	}
 	recs, next, more, err := s.Store.Query(callsign, since, limit, types)
 	if err != nil {
 		return fmt.Errorf("store: query: %w", err)
 	}
-	res := message{Type: TypeResult, Envs: make([]string, 0, len(recs))}
+	res := message{Type: TypeResult, Envs: make([]string, 0, len(recs)), At: make([]uint32, 0, len(recs))}
 	for _, r := range recs {
 		res.Envs = append(res.Envs, encodeEnv(r.Env))
+		res.At = append(res.At, r.ReceivedAt)
 	}
 	if more {
 		res.Next = &next

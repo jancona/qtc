@@ -31,7 +31,7 @@ type Store interface {
 	// every record sharing the last record's ReceivedAt is included. more
 	// reports whether records after the returned page exist; next is the
 	// last record's ReceivedAt, from which the caller queries again.
-	Query(callsign envelope.Address, since uint32, limit int, types []envelope.PacketType) (recs []Record, next uint32, more bool, err error)
+	Query(callsign envelope.Address, since uint32, limit int, types []envelope.Kind) (recs []Record, next uint32, more bool, err error)
 	// Expire discards records whose Expiry is at or before now and reports
 	// how many were dropped.
 	Expire(now uint32) int
@@ -83,11 +83,11 @@ func (m *MemStore) Put(rec Record) (bool, error) {
 }
 
 // Query implements Store.
-func (m *MemStore) Query(callsign envelope.Address, since uint32, limit int, types []envelope.PacketType) ([]Record, uint32, bool, error) {
+func (m *MemStore) Query(callsign envelope.Address, since uint32, limit int, types []envelope.Kind) ([]Record, uint32, bool, error) {
 	if limit <= 0 {
 		limit = DefaultLimit
 	}
-	want := func(t envelope.PacketType) bool {
+	want := func(t envelope.Kind) bool {
 		if len(types) == 0 {
 			return true
 		}
@@ -109,7 +109,7 @@ func (m *MemStore) Query(callsign envelope.Address, since uint32, limit int, typ
 	i := start
 	for ; i < len(b.recs); i++ {
 		r := b.recs[i]
-		if !want(r.Env.Type()) {
+		if !want(r.Env.Kind()) {
 			continue
 		}
 		if len(out) >= limit && r.ReceivedAt != out[len(out)-1].ReceivedAt {
@@ -119,7 +119,7 @@ func (m *MemStore) Query(callsign envelope.Address, since uint32, limit int, typ
 	}
 	more := false
 	for ; i < len(b.recs); i++ {
-		if want(b.recs[i].Env.Type()) {
+		if want(b.recs[i].Env.Kind()) {
 			more = true
 			break
 		}

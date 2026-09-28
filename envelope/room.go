@@ -13,11 +13,17 @@ type Room struct{ e *Envelope }
 // Envelope returns the underlying envelope.
 func (r Room) Envelope() *Envelope { return r.e }
 
+// ROOM offsets (rooms spec §5.1).
+const (
+	roomOffOp    = 4
+	roomOffCount = 9
+)
+
 // Op is the operation (rooms spec §5.2).
-func (r Room) Op() RoomOp { return RoomOp(r.e.raw[3]) }
+func (r Room) Op() RoomOp { return RoomOp(r.e.raw[roomOffOp]) }
 
 // Count is the number of room addresses.
-func (r Room) Count() int { return int(r.e.raw[8]) }
+func (r Room) Count() int { return int(r.e.raw[roomOffCount]) }
 
 // Rooms returns the listed room addresses.
 func (r Room) Rooms() []Address {
@@ -42,12 +48,12 @@ func BuildRoom(op RoomOp, timestamp uint32, rooms []Address, note string) (*Enve
 		return nil, fmt.Errorf("envelope: ROOM payload of %d bytes exceeds %d", n, MaxPayload)
 	}
 	raw := make([]byte, RoomHeaderLen, RoomHeaderLen+len(rooms)*AddressLen+len(note))
-	raw[0] = byte(TypeROOM)
-	raw[1] = Version0
-	raw[2] = 0
-	raw[3] = byte(op)
-	binary.BigEndian.PutUint32(raw[4:8], timestamp)
-	raw[8] = byte(len(rooms))
+	raw[offType] = byte(TypeQTC)
+	raw[offKind] = byte(KindROOM)
+	raw[offVersion] = Version0
+	raw[roomOffOp] = byte(op)
+	binary.BigEndian.PutUint32(raw[5:9], timestamp)
+	raw[roomOffCount] = byte(len(rooms))
 	for _, a := range rooms {
 		var b [AddressLen]byte
 		a.put(b[:])

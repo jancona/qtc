@@ -91,7 +91,7 @@ func (s *FileStore) Put(rec Record) (bool, error) {
 }
 
 // Query implements Store.
-func (s *FileStore) Query(callsign envelope.Address, since uint32, limit int, types []envelope.PacketType) ([]Record, uint32, bool, error) {
+func (s *FileStore) Query(callsign envelope.Address, since uint32, limit int, types []envelope.Kind) ([]Record, uint32, bool, error) {
 	return s.mem.Query(callsign, since, limit, types)
 }
 

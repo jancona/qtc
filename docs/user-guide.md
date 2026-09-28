@@ -94,7 +94,19 @@ Incoming messages show the time and the sender. Room messages show the room firs
 19:43 * joined MAINE
 ```
 
-While `qtc chat` is connected, the station counts you as present, so messages reach you as they arrive. When you connect after being away, you get what's waiting, as described [above](#when-youve-been-away). If the station refuses the connection, your callsign probably isn't on its allow list.
+While `qtc chat` is connected, the station counts you as present, so messages reach you as they arrive. Each time you connect, `qtc chat` fetches everything you missed since last time, not just the 10 most recent; older messages show their date.
+
+Unlike a radio, `qtc chat` confirms what happens to your direct messages. Lines starting with `*` report it:
+
+```
+19:44 * W1XYZ received "are you on the net tonight?"
+19:45 * "see you there" sent on the air by N1ADJ Q
+19:46 * not sent, the node did not answer: "hello?"
+```
+
+"Received" means W1XYZ's `qtc chat` (or another program like it) got the message. "Sent on the air" means a hotspot transmitted it to W1XYZ's radio, which can't confirm it arrived.
+
+If the station refuses the connection, your callsign probably isn't on its allow list.
 
 ## What to keep in mind
 

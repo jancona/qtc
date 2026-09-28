@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -37,6 +38,9 @@ func TestMailboxRecordSignVerifyJSON(t *testing.T) {
 	}
 	if err := rec.Verify(); err != nil {
 		t.Fatal(err)
+	}
+	if in := rec.SigningInput(); !strings.HasPrefix(string(in), "QTC-record") {
+		t.Errorf("signing input % x lacks the record context", in[:12])
 	}
 	// JSON round trip keeps everything, including the base callsign.
 	b, err := json.Marshal(rec)

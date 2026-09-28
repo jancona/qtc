@@ -59,9 +59,13 @@ var (
 // (node protocol §7.3).
 func (r *MailboxRecord) Provisional() bool { return r.Policy&PolicyProvisional != 0 }
 
+// recordSigningContext separates record signatures from anything else a
+// node key signs, such as receipts (node protocol §4).
+const recordSigningContext = "QTC-record"
+
 // SigningInput is the canonical byte string the signature covers.
 func (r *MailboxRecord) SigningInput() []byte {
-	var b []byte
+	b := []byte(recordSigningContext)
 	cs := r.Callsign.Base().Bytes()
 	b = append(b, cs[:]...)
 	b = binary.BigEndian.AppendUint64(b, r.Version)
