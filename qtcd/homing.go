@@ -296,7 +296,7 @@ func (r *Station) sweepSince(h *homed, from int64) bool {
 			r.deliverLocal(e)
 		}
 	}
-	r.replay(replay, now)
+	r.replay(h.base, replay, now)
 	if now > h.lastSweep {
 		h.lastSweep = now
 	}
@@ -452,16 +452,24 @@ func (r *Station) hold(d envelope.Address, e *envelope.Envelope) {
 	r.log.Debug("held for device", "device", d, "envelope", e)
 }
 
-// replay delivers the messages a sweep found without a DELIVERED receipt
-// (node protocol §7.1): to each reachable local device, the ReplayLimit
+// replay delivers the messages a sweep of base's mailbox found without a
+// DELIVERED receipt (node protocol §7.1): to each reachable local device of
+// base, the ReplayLimit
 // most recent it has not had, oldest first. msgs is in mailbox order, which
 // breaks ties between messages with the same timestamp. Older ones are recorded as
 // skipped so they never come back, and the device gets one notice saying
 // how many.
-func (r *Station) replay(msgs []*envelope.Envelope, now uint32) {
+func (r *Station) replay(base envelope.Address, msgs []*envelope.Envelope, now uint32) {
 	pending := map[envelope.Address][]*envelope.Envelope{}
 	for _, e := range msgs {
 		for _, d := range r.targets(e) {
+			// Only base's own devices: base's mailbox also holds copies of
+			// messages base sent, and their recipients' delivery records
+			// are in the recipients' mailboxes, not this one. A recipient
+			// gets its replay from its own mailbox's sweep.
+			if d.Base() != base {
+				continue
+			}
 			if !r.delivered.has(deliveryKey{id: e.StoreID(), device: d}) {
 				pending[d] = append(pending[d], e)
 			}

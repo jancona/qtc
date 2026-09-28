@@ -27,7 +27,7 @@ func TestReplayCap(t *testing.T) {
 	for i := 14; i >= 0; i-- { // out of order on purpose
 		msgs = append(msgs, mustMsg(t, w1aw, ht, now-1000+uint32(i), 60, uint16(i), 0, fmt.Sprintf("m%02d", i)))
 	}
-	r.replay(msgs, now)
+	r.replay(ht.Base(), msgs, now)
 
 	var bodies []string
 	for _, d := range got.list {
@@ -46,7 +46,7 @@ func TestReplayCap(t *testing.T) {
 		}
 	}
 
-	r.replay(msgs, now)
+	r.replay(ht.Base(), msgs, now)
 	if n := len(got.list); n != len(want) {
 		t.Errorf("second replay sent %d more", n-len(want))
 	}
@@ -145,7 +145,7 @@ func TestReplaySameSecondKeepsOrder(t *testing.T) {
 	for i := 1; i <= 12; i++ {
 		msgs = append(msgs, mustMsg(t, w1aw, ht, now-5, 60, uint16(1000-i), 0, fmt.Sprintf("test %d", i)))
 	}
-	r.replay(msgs, now)
+	r.replay(ht.Base(), msgs, now)
 	var bodies []string
 	for _, d := range got.list {
 		bodies = append(bodies, bodyOf(d.env))
@@ -259,5 +259,27 @@ func TestDeliveryRecordsStopReplayElsewhere(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 	if n := got.count(func(delivery) bool { return true }); n != 11 {
 		t.Errorf("%d deliveries after a sweep with no local history, want still 11", n)
+	}
+}
+
+// TestReplayOnlyToSweptCallsign: sweeping a sender's mailbox, which holds
+// copies of what it sent, must not replay those messages to their
+// recipients; their own mailbox's sweep does that, with their records.
+func TestReplayOnlyToSweptCallsign(t *testing.T) {
+	var got deliveries
+	r := startStation(t, Config{Callsign: "N1ADJ  Z"}, &got)
+	ht, w1aw := mustAddr(t, "N1ADJ  H"), mustAddr(t, "W1AW")
+	now := unixNow()
+	r.presence.heard(ht, ViaLocal, now)
+	r.presence.heard(w1aw, ViaLocal, now)
+	msgs := []*envelope.Envelope{mustMsg(t, w1aw, ht, now-5, 60, 1, 0, "sent by W1AW")}
+
+	r.replay(w1aw.Base(), msgs, now) // W1AW's mailbox sweep
+	if n := got.count(func(delivery) bool { return true }); n != 0 {
+		t.Fatalf("sweeping the sender's mailbox delivered %d to the recipient", n)
+	}
+	r.replay(ht.Base(), msgs, now) // the recipient's own sweep
+	if n := got.count(func(delivery) bool { return true }); n != 1 {
+		t.Errorf("recipient's sweep delivered %d, want 1", n)
 	}
 }
