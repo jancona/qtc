@@ -3,10 +3,12 @@ package qtcd
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"net"
 	"testing"
 	"time"
 
+	"github.com/jancona/m17"
 	"github.com/jancona/qtc/envelope"
 )
 
@@ -363,5 +365,81 @@ func TestInetSyncPaging(t *testing.T) {
 	page, _, _, _, _ := r.inetSync(dev, syncReq(t, envelope.SyncFlagAll|envelope.SyncFlagSent, 0, 0), 50)
 	if len(page) != len(want)+1 || page[len(page)-1].ID() != sent.ID() {
 		t.Errorf("ALL|SENT synced %d, last %s", len(page), page[len(page)-1])
+	}
+}
+
+// withECD sets Extended Callsign Data on a packet or stream datagram's LSF
+// and fixes its CRCs.
+func withECD(t *testing.T, b []byte, slot1, slot2 envelope.Address) []byte {
+	t.Helper()
+	b = append([]byte(nil), b...)
+	s1, s2 := m17.EncodedCallsign(slot1.Bytes()), m17.EncodedCallsign(slot2.Bytes())
+	var p2 *m17.EncodedCallsign
+	if slot2 != 0 {
+		p2 = &s2
+	}
+	switch string(b[:4]) {
+	case magicM17P:
+		p := m17.NewPacketFromBytes(b[4:])
+		p.LSF.SetECD(&s1, p2)
+		p.CalcCRC()
+		return append([]byte(magicM17P), p.ToBytes()...)
+	case magicM17S:
+		sd, err := m17.NewStreamDatagramFromBytes(b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sd.LSF.SetECD(&s1, p2)
+		copy(b[6:6+lsfLen-2], sd.LSF.ToBytes()[:lsfLen-2])
+		binary.BigEndian.PutUint16(b[len(b)-2:], m17.CRC(b[:len(b)-2]))
+		return b
+	}
+	t.Fatalf("not a packet or stream datagram")
+	return nil
+}
+
+// TestRelayedTrafficIgnored: a packet another gateway transmitted from the
+// network (marked by its ECD) is not taken in, and relayed voice is not
+// heard; a repeater's local repeat still counts. An SMS identical to one
+// taken in a moment ago is dropped.
+func TestRelayedTrafficIgnored(t *testing.T) {
+	core := &stubCore{node: mustAddr(t, "N1ADJ  Z"), local: mustRoom(t, "N1ADJ")}
+	face := startNativeFace(t, core, nil) // loopback is a gateway
+	gwCall, other, refl := mustAddr(t, "N1ADJ  G"), mustAddr(t, "K1ABC  G"), mustAddr(t, "M17-QTC")
+	ht, w1aw := mustAddr(t, "N1ADJ  H"), mustAddr(t, "W1AW")
+	gw := newUDPPeer(t)
+	gw.sendTo(t, face.Addr(), connDatagram(gwCall, 'A'))
+	gw.expect(t, magicACKN)
+
+	// Relayed: another gateway's SMS from the network, and reflector voice.
+	gw.sendTo(t, face.Addr(), withECD(t, smsDatagram(ht, w1aw, "round and round"), other, refl))
+	gw.sendTo(t, face.Addr(), withECD(t, streamDatagram(ht, w1aw), w1aw, refl))
+	native := mustMsg(t, w1aw, ht, 1, 60, 1, 0, "native, relayed")
+	gw.sendTo(t, face.Addr(), withECD(t, buildPacketDatagram(ht, w1aw, native.Bytes()), other, refl))
+	time.Sleep(300 * time.Millisecond)
+	core.mu.Lock()
+	if len(core.sent) != 0 || len(core.heard) != 0 {
+		t.Errorf("relayed traffic taken in: sent %d, heard %v", len(core.sent), core.heard)
+	}
+	core.mu.Unlock()
+
+	// A repeater's local repeat names the source in slot 1 only: local.
+	gw.sendTo(t, face.Addr(), withECD(t, streamDatagram(w1aw, ht), ht, 0))
+	eventually(t, "local repeat heard", 2*time.Second, func() bool {
+		core.mu.Lock()
+		defer core.mu.Unlock()
+		return len(core.heard) == 1 && core.heard[0] == ht
+	})
+	gw.sendTo(t, face.Addr(), withECD(t, smsDatagram(w1aw, ht, "via the repeater"), ht, 0))
+	eventually(t, "local repeat taken in", 2*time.Second, func() bool { return core.sentCount() == 1 })
+
+	// The same SMS again (a loop through a gateway that does not mark
+	// what it relays): dropped. Different text: taken.
+	gw.sendTo(t, face.Addr(), smsDatagram(w1aw, ht, "via the repeater"))
+	gw.sendTo(t, face.Addr(), smsDatagram(w1aw, ht, "something new"))
+	eventually(t, "new text taken in", 2*time.Second, func() bool { return core.sentCount() == 2 })
+	time.Sleep(200 * time.Millisecond)
+	if n := core.sentCount(); n != 2 {
+		t.Errorf("%d SMS taken in, want 2", n)
 	}
 }

@@ -120,6 +120,7 @@ type inetFace struct {
 	devices  map[envelope.Address]*inetSession // device -> qtc-mode session that heard it
 	native   map[envelope.Address]bool         // devices whose latest packet was QTC, not SMS
 	orphans  map[envelope.Address]orphan       // devices whose gateway link closed, until it relinks
+	smsSeen  map[smsKey]time.Time              // recent SMS taken in, by content (repeatedSMS)
 	wg       sync.WaitGroup
 	ctx      context.Context
 	cancel   context.CancelFunc
@@ -199,6 +200,7 @@ func newInetFace(core inetCore, cfg InetConfig) (*inetFace, error) {
 		devices:  map[envelope.Address]*inetSession{},
 		native:   map[envelope.Address]bool{},
 		orphans:  map[envelope.Address]orphan{},
+		smsSeen:  map[smsKey]time.Time{},
 	}
 	for _, c := range cfg.AllowCallsigns {
 		a, err := envelope.EncodeAddress(strings.TrimSpace(c))
@@ -383,7 +385,9 @@ func (f *inetFace) handleClient(b []byte, addr *net.UDPAddr) {
 		s.close(false)
 		f.mu.Unlock()
 	case magicM17S:
-		if _, src, ok := streamAddrs(b); ok && s.qtcMode {
+		// A relayed stream (reflector voice another gateway transmitted)
+		// passes, but its source is not here.
+		if _, src, relayed, ok := streamAddrs(b); ok && s.qtcMode && !relayed {
 			s.heard(src)
 		}
 		s.forwardUp(b)
@@ -679,6 +683,13 @@ func (s *inetSession) clientPacket(b []byte) {
 		return
 	}
 	if s.qtcMode {
+		if pf.relayed && (pf.typ == envelope.TypeSMS || pf.typ == envelope.TypeQTC) {
+			// Another gateway transmitted this from the network, and this
+			// one heard it. Taking it in would send it round again, as a
+			// new message for an SMS, and its source is not here.
+			s.face.log.Debug("relayed packet heard on RF; dropped", "client", s.client, "src", pf.src, "dst", pf.dst, "type", pf.typ)
+			return
+		}
 		if !s.face.allowed(pf.src, s.via) {
 			s.face.log.Info("packet from callsign not allowed; dropped", "client", s.client, "src", pf.src)
 			return
@@ -775,10 +786,48 @@ func (s *inetSession) ingestSMS(pf packetFrame) {
 		s.face.log.Info("bad SMS from client", "client", s.client, "err", err)
 		return
 	}
+	if s.face.repeatedSMS(e) {
+		s.face.log.Info("repeated SMS dropped", "client", s.client, "envelope", e)
+		return
+	}
 	if err := s.face.core.inetSend(e); err != nil {
 		s.face.log.Info("SMS not sent", "client", s.client, "envelope", e, "err", err)
 		s.replySMS(pf.src, "not sent: "+err.Error())
 	}
+}
+
+// smsRepeatWindow is how long an SMS's content is remembered: an identical
+// one (same source, destination, and text) within it is not taken in again.
+var smsRepeatWindow = 5 * time.Minute
+
+type smsKey struct {
+	src, dst envelope.Address
+	body     string
+}
+
+// repeatedSMS reports whether an identical SMS was taken in within
+// smsRepeatWindow, and remembers this one either way. An SMS has no ID of
+// its own, so this is what stops two hotspots that hear each other from
+// passing one message back and forth as ever-new ones when the relayed
+// copies carry no mark (see relayed); each sighting renews the window. The
+// cost is that a radio sending the same text to the same place twice in a
+// few minutes gets it through once.
+func (f *inetFace) repeatedSMS(e *envelope.Envelope) bool {
+	m, _ := e.Msg()
+	k := smsKey{src: e.Source(), dst: e.Destination(), body: m.Body()}
+	now := time.Now()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	last, seen := f.smsSeen[k]
+	f.smsSeen[k] = now
+	if len(f.smsSeen) > 1000 {
+		for key, at := range f.smsSeen {
+			if now.Sub(at) > smsRepeatWindow {
+				delete(f.smsSeen, key)
+			}
+		}
+	}
+	return seen && now.Sub(last) < smsRepeatWindow
 }
 
 // isNodeAddress reports whether a client addressed the node itself. Runs of

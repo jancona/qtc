@@ -221,7 +221,7 @@ func TestM17Frame(t *testing.T) {
 	if _, err := parsePacketDatagram(dg); err == nil {
 		t.Error("accepted a bad payload CRC")
 	}
-	if _, s, ok := streamAddrs(streamDatagram(dst, src)); !ok || s != src {
+	if _, s, rel, ok := streamAddrs(streamDatagram(dst, src)); !ok || s != src || rel {
 		t.Error("streamAddrs failed")
 	}
 }

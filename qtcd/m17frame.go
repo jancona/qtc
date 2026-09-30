@@ -59,6 +59,23 @@ type packetFrame struct {
 	dst, src envelope.Address
 	typ      envelope.PacketType
 	payload  []byte // type byte through the end of the contents, CRC stripped
+	relayed  bool   // the LSF says a gateway or reflector relayed it (see relayed)
+}
+
+// relayed reports whether an LSF marks its transmission as relayed rather
+// than sent by the radio named as its source: Extended Callsign Data in
+// META naming a reflector (slot 2), or someone other than the source in
+// slot 1. m17-gateway marks everything it transmits from the network this
+// way: packets with its own callsign and the reflector, voice with the
+// source and the reflector. A repeater's local repeat (the source in slot
+// 1, slot 2 empty) is still the radio's own transmission.
+func relayed(lsf *m17.LSF) bool {
+	e := lsf.ECD()
+	if e == nil {
+		return false
+	}
+	var zero m17.EncodedCallsign
+	return *e.Callsign2 != zero || (*e.Callsign1 != zero && *e.Callsign1 != lsf.Src)
 }
 
 // parsePacketDatagram parses an "M17P" datagram, checking both CRCs.
@@ -82,16 +99,18 @@ func parsePacketDatagram(b []byte) (packetFrame, error) {
 	f.src = envelope.AddressFromBytes(p.LSF.Src[:])
 	f.typ = envelope.PacketType(p.Type)
 	f.payload = append([]byte{byte(p.Type)}, p.Payload...)
+	f.relayed = relayed(p.LSF)
 	return f, nil
 }
 
-// streamAddrs reads the destination and source from a stream frame.
-func streamAddrs(b []byte) (dst, src envelope.Address, ok bool) {
+// streamAddrs reads the destination and source from a stream frame, and
+// whether it was relayed.
+func streamAddrs(b []byte) (dst, src envelope.Address, isRelayed, ok bool) {
 	sd, err := m17.NewStreamDatagramFromBytes(b)
 	if err != nil {
-		return 0, 0, false
+		return 0, 0, false, false
 	}
-	return envelope.AddressFromBytes(sd.LSF.Dst[:]), envelope.AddressFromBytes(sd.LSF.Src[:]), true
+	return envelope.AddressFromBytes(sd.LSF.Dst[:]), envelope.AddressFromBytes(sd.LSF.Src[:]), relayed(sd.LSF), true
 }
 
 // controlDatagram builds a 10-byte control datagram (ACKN, NACK, PING,
