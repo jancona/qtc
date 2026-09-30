@@ -95,7 +95,10 @@ func TestHostsDownload(t *testing.T) {
 	gw := newUDPPeer(t)
 	gwCall := mustAddr(t, "N1ADJ  G")
 	gw.sendTo(t, face.Addr(), connDatagram(gwCall, 'A'))
-	gw.expect(t, magicNACK)
+	// Not ready yet: no answer at all, since a gateway does not retry
+	// after NACK.
+	gw.expectNone(t, magicNACK, 300*time.Millisecond)
+	gw.expectNone(t, magicACKN, 10*time.Millisecond)
 
 	up.Store(true)
 	eventually(t, "module resolved", 3*time.Second, func() bool { return face.upstreamOf('A') != nil })

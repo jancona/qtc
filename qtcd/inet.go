@@ -419,15 +419,17 @@ func (f *inetFace) connect(b []byte, addr *net.UDPAddr) {
 		f.mu.Lock()
 		ua := f.upstream[module]
 		f.mu.Unlock()
+		// Not ready is not a refusal: NACK is for permanent refusals
+		// (M17_inet), and a gateway does not retry after one. Leave the
+		// CONN unanswered; the gateway resends it with backoff, and links
+		// once the upstream resolves.
 		if ua == nil {
-			f.log.Warn("NACK: upstream reflector not resolved", "client", addr, "module", string(module), "reflector", mod.Reflector)
-			f.send(addr, controlDatagram(magicNACK, f.core.inetCallsign()))
+			f.log.Warn("not answering link: upstream reflector not resolved yet", "client", addr, "module", string(module), "reflector", mod.Reflector)
 			return
 		}
 		var err error
 		if up, err = net.DialUDP("udp", nil, ua); err != nil {
-			f.log.Warn("upstream dial failed", "module", string(module), "upstream", ua, "err", err)
-			f.send(addr, controlDatagram(magicNACK, f.core.inetCallsign()))
+			f.log.Warn("not answering link: upstream dial failed", "client", addr, "module", string(module), "upstream", ua, "err", err)
 			return
 		}
 		upAddr = ua
