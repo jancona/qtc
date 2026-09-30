@@ -129,7 +129,9 @@ for value in "${VALUES[@]}"; do
     for ((n = 1; n <= COUNT; n++)); do
         body=$(printf '%s %02d/%02d' "$value" "$n" "$COUNT")
         if [ -n "$LEN" ] && [ "${#body}" -lt "$LEN" ]; then
-            body="$body ${FILLER:0:$((LEN - ${#body} - 1))}"
+            pad=$FILLER
+            while [ "${#pad}" -lt "$LEN" ]; do pad="$pad $FILLER"; done
+            body="$body ${pad:0:$((LEN - ${#body} - 1))}"
         fi
         qtc send -admin "$ADMIN" -from "$FROM" -to "$DEVICE" -body "$body" >/dev/null
     done
