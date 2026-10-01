@@ -43,7 +43,7 @@ sudo ./m17-hotspot-installer.sh -q
 
 `-q` installs QTC without asking. Without it, the installer asks near the end. The installer is safe to run on an existing hotspot, but it does run a full system upgrade and update the dashboard.
 
-It also asks `Do you want to flash the latest firmware to the HAT? (Y/n)`. On an MMDVM_HS hotspot, type `y` and choose your board: pressing Enter skips the flash. On a CC1200 or MMDVM repeater board you can type `n`, or add `-n` to the command to skip the question.
+It also asks `Do you want to flash the latest firmware to the HAT? (y/N)`. On an MMDVM_HS hotspot, type `y` and choose your board; pressing Enter skips the flash. On a CC1200 or MMDVM repeater board you can type `n`, or add `-n` to the command to skip the question.
 
 The QTC step:
 
