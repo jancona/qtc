@@ -44,7 +44,7 @@ QTC works with today's M17 radios: they send and receive ordinary SMS, and QTC d
 
 ## Trying it
 
-QTC is in an invite-only test with a small group of hams. If you'd like to take part, find N1ADJ on the M17 Project Discord, or open an issue at [github.com/jancona/qtc/issues](https://github.com/jancona/qtc/issues).
+QTC is in an invite-only test with a small group of hams. If you'd like to take part, find N1ADJ on the [M17 Project Discord](https://discord.gg/4brEP8wwVp), or open an issue at [github.com/jancona/qtc/issues](https://github.com/jancona/qtc/issues).
 
 - **You run an M17 hotspot:** the [operator guide](docs/operator-guide.md) covers installing `qtcd` on a Raspberry Pi hotspot running `m17-gateway`, with the hotspot installer or the `.deb` package.
 - **You use an M17 radio:** the [user guide](docs/user-guide.md) explains sending messages, rooms, and what happens while you're away.
