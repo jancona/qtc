@@ -193,7 +193,7 @@ Legacy clients and radios send and receive SMS. Nodes translate at the boundary.
 
 Because the node minted the timestamp and nonce, a legacy sender cannot request or receive receipts. A node may present message status to legacy users by other means (a local web page, a synthesized SMS reply) but this is a node feature, not part of the protocol.
 
-**MSG → SMS (egress).** A node delivering a MSG to a legacy client or radio emits an SMS whose LSF Source and Destination are the envelope's Source and Destination and whose text is the Body followed by a NUL. Signatures are dropped. If RCPT_REQ was set, the node issues TRANSMITTED once the SMS has been sent.
+**MSG → SMS (egress).** A node delivering a MSG to a legacy client or radio emits an SMS whose LSF Source is the envelope's Source, whose LSF Destination is the device it is delivering to (suffix included, whatever the envelope's Destination: radios show only SMS addressed to their own callsign, so one addressed to `N1ADJ` never appears on `N1ADJ 8`), and whose text is the Body followed by a NUL. Signatures are dropped. If RCPT_REQ was set, the node issues TRANSMITTED once the SMS has been sent.
 
 **Receipts to legacy clients.** Dropped. Optionally rendered as SMS text at the node's discretion.
 

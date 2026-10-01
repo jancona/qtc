@@ -57,7 +57,7 @@ This replaces the separate MSG (`0x08`), RCPT (`0x09`), and ROOM (`0x0A`) packet
 
 A packet's LSF carries its addressing:
 
-- **MSG and RCPT:** LSF Source is the envelope's Source, and LSF Destination the envelope's Destination. A room MSG sent by a node goes to the room address (§6).
+- **MSG and RCPT:** LSF Source is the envelope's Source. From a device, LSF Destination is the envelope's Destination. From a node, it is the device the packet is for, suffix included, whatever the envelope's Destination, since a radio may show only what is addressed to its own callsign; a room MSG on RF, which serves every radio in range, goes to the room address (§6).
 - **ROOM, SYNC, and ACK** are control packets. From a device, LSF Source is the device and LSF Destination is the node's callsign or the broadcast address (`0xFFFFFFFFFFFF`). The broadcast address lets a radio that has not yet learned its node's callsign reach whatever node hears it. From a node, LSF Source is the node's callsign and LSF Destination is the device. A node handles a control packet addressed to its own callsign or to broadcast, and never forwards one.
 
 **Signatures.** A signature covers a context string and the Kind as well as the packet's own bytes:

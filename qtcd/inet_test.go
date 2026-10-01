@@ -375,8 +375,10 @@ func TestInetFace(t *testing.T) {
 	upstream.sendTo(t, upFrom, streamDatagram(ht, w1aw))
 	gateway.expect(t, magicM17S)
 
-	// Delivery: a MSG for the HT goes out as SMS to the gateway; a RCPT does not.
-	face.deliver(ht, mustMsg(t, w1aw, ht, 1, 60, 3, 0, "for the HT"))
+	// Delivery: a MSG for the HT goes out as SMS to the gateway, addressed
+	// to the HT itself even when sent to the base callsign, since a radio
+	// shows only SMS to its own callsign; a RCPT does not go out.
+	face.deliver(ht, mustMsg(t, w1aw, ht.Base(), 1, 60, 3, 0, "for the HT"))
 	out, _ := gateway.expect(t, magicM17P)
 	pf, err = parsePacketDatagram(out)
 	if err != nil || pf.dst != ht || pf.src != w1aw || pf.typ != envelope.TypeSMS || string(pf.payload[1:]) != "for the HT\x00" {

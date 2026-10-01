@@ -101,13 +101,13 @@ func TestNativeAckAndRetry(t *testing.T) {
 	}
 
 	// Delivery to the device: resent until DELIVERED.
-	in := mustMsg(t, w1aw, dev, 1, 60, 3, envelope.FlagRcptReq, "for you")
+	in := mustMsg(t, w1aw, dev.Base(), 1, 60, 3, envelope.FlagRcptReq, "for you")
 	if res := face.deliver(dev, in); res != deliverPending {
 		t.Fatalf("deliver = %d, want pending", res)
 	}
 	for range 2 {
 		pf, e := client.expectQTC(t)
-		if e.ID() != in.ID() || pf.dst != dev.Base() && pf.dst != in.Destination() {
+		if e.ID() != in.ID() || pf.dst != dev { // the device, though sent to the base callsign
 			t.Fatalf("got %s to %s", e, pf.dst)
 		}
 	}

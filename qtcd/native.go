@@ -115,7 +115,7 @@ func (f *inetFace) isNative(device envelope.Address) bool {
 func (s *inetSession) deliverNative(device envelope.Address, e *envelope.Envelope) deliverResult {
 	if e.Kind() != envelope.KindMSG {
 		s.face.log.Debug("receipt to native client", "client", s.client, "device", device, "envelope", e)
-		s.sendEnvelope(e.Destination(), e.Source(), e)
+		s.sendEnvelope(device, e.Source(), e)
 		return deliverSent
 	}
 	if e.Destination().IsRoom() && s.via == ViaRF {
@@ -128,7 +128,9 @@ func (s *inetSession) deliverNative(device envelope.Address, e *envelope.Envelop
 }
 
 // sendEnvelope frames a QTC payload for the client with the given LSF
-// addresses.
+// addresses. Anything for one device is addressed to that device, suffix
+// and all, whatever the envelope's destination: radios show only what is
+// addressed to their own callsign. Room messages on RF go to the room.
 func (s *inetSession) sendEnvelope(dst, src envelope.Address, e *envelope.Envelope) {
 	s.face.send(s.client, buildPacketDatagram(dst, src, e.Bytes()))
 }
@@ -159,7 +161,7 @@ func (s *inetSession) track(device envelope.Address, e *envelope.Envelope, fresh
 	}
 	s.nat.pending[k] = &pendingMsg{e: e, attempts: 1, next: time.Now().Add(s.ackTimeout(queued)), fresh: fresh}
 	s.mu.Unlock()
-	s.sendEnvelope(e.Destination(), e.Source(), e)
+	s.sendEnvelope(device, e.Source(), e)
 }
 
 // onAck handles a device's DELIVERED or ACK for a message (client spec §4).
@@ -184,7 +186,7 @@ func (s *inetSession) retry(now time.Time) {
 		device envelope.Address
 		p      *pendingMsg
 	}
-	var resend []*envelope.Envelope
+	var resend []lostMsg
 	var lost []lostMsg
 	s.mu.Lock()
 	for k, p := range s.nat.pending {
@@ -198,12 +200,12 @@ func (s *inetSession) retry(now time.Time) {
 		}
 		p.attempts++
 		p.next = now.Add(s.ackTimeout(0))
-		resend = append(resend, p.e)
+		resend = append(resend, lostMsg{k.device, p})
 	}
 	s.mu.Unlock()
-	for _, e := range resend {
-		s.face.log.Debug("resending unacknowledged MSG", "client", s.client, "envelope", e)
-		s.sendEnvelope(e.Destination(), e.Source(), e)
+	for _, r := range resend {
+		s.face.log.Debug("resending unacknowledged MSG", "client", s.client, "device", r.device, "envelope", r.p.e)
+		s.sendEnvelope(r.device, r.p.e.Source(), r.p.e)
 	}
 	for _, l := range lost {
 		s.face.log.Info("native device did not acknowledge; holding", "client", s.client, "device", l.device, "id", l.p.e.ID())
@@ -317,7 +319,7 @@ func (s *inetSession) syncRequest(device envelope.Address, y envelope.Sync) {
 		if e.Kind() == envelope.KindMSG {
 			s.track(device, e, false, i+1)
 		} else {
-			s.sendEnvelope(e.Destination(), e.Source(), e)
+			s.sendEnvelope(device, e.Source(), e)
 		}
 	}
 }

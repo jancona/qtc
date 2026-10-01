@@ -994,16 +994,16 @@ func (f *inetFace) deliver(device envelope.Address, e *envelope.Envelope) delive
 		f.log.Warn("cannot send as SMS", "device", device, "envelope", e, "err", err)
 		return deliverSent
 	}
-	dst := e.Destination()
-	if name, ok := dst.RoomName(); ok {
+	if name, ok := e.Destination().RoomName(); ok {
 		// A legacy radio cannot show an Extended address, so a room message
-		// is addressed to the device with the room named in the text
-		// (rooms spec §6).
-		dst = device
+		// names the room in the text (rooms spec §6).
 		body := append([]byte("#"+name+" "), sms[1:]...)
 		sms = append([]byte{byte(envelope.TypeSMS)}, body...)
 	}
+	// Addressed to the device, suffix and all, not to the envelope's
+	// destination: a radio shows only SMS to its own callsign, so one sent
+	// to "N1ADJ" never appears on "N1ADJ 8" (envelope §6).
 	f.log.Info("delivering SMS to client", "client", s.client, "device", device, "envelope", e)
-	f.send(s.client, buildPacketDatagram(dst, e.Source(), sms))
+	f.send(s.client, buildPacketDatagram(device, e.Source(), sms))
 	return deliverSent
 }
