@@ -3,7 +3,7 @@ module github.com/jancona/qtc
 go 1.26.2
 
 require (
-	github.com/jancona/m17 v0.6.3
+	github.com/jancona/m17 v0.6.8
 	github.com/libp2p/go-libp2p v0.49.0
 	github.com/libp2p/go-libp2p-kad-dht v0.42.2
 	github.com/libp2p/go-libp2p-pubsub v0.17.0
