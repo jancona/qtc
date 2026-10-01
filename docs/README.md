@@ -5,7 +5,7 @@ Running QTC: [`operator-guide.md`](operator-guide.md) for hotspot and station op
 Design, for developers. Read in this order:
 
 1. `qtc-architecture.md` — roles, trust, identity, message flow, milestones
-2. `qtc-envelope.md` — MSG/RCPT packet types
+2. `qtc-envelope.md` — the QTC packet type; MSG and RCPT
 3. `qtc-rooms.md` — rooms and the ROOM packet type
 4. `qtc-node-protocol.md` — node-to-node protocol on libp2p (draft 0.2)
 5. `qtc-client.md` — native clients: the single QTC packet type, acknowledgement, sync (draft 0.1)
