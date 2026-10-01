@@ -86,6 +86,8 @@ qtc chat -callsign N1ADJ -node qtc.example.net
 | `/join MAINE`, `/leave MAINE`, `/rooms` | Room commands, answered by the station |
 | `/help`, `/quit` | Help, and disconnect |
 
+The arrow keys edit the line you're typing, and Up and Down bring back earlier lines. Ctrl-C or Ctrl-D also disconnects. A message that arrives while you're typing prints above your line without disturbing it.
+
 Incoming messages show the time and the sender. Room messages show the room first, and replies from the station itself start with `*`:
 
 ```

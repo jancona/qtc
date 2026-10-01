@@ -17,6 +17,7 @@ import (
 	"github.com/jancona/m17"
 	"github.com/jancona/qtc/client"
 	"github.com/jancona/qtc/envelope"
+	"golang.org/x/term"
 )
 
 // qtc chat is a terminal client for a QTC node's client face (node protocol
@@ -58,7 +59,23 @@ func runChat(args []string) error {
 	c.statePath = client.DefaultStatePath(c.meAddr)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	return c.run(ctx, addr, os.Stdin, os.Stdout)
+	var out io.Writer = os.Stdout
+	if fd := int(os.Stdin.Fd()); term.IsTerminal(fd) && term.IsTerminal(int(os.Stdout.Fd())) {
+		// Edit the line being typed (arrow keys, history), and keep it
+		// intact when a message prints while typing. Ctrl-C or Ctrl-D
+		// ends input, which quits.
+		old, err := term.MakeRaw(fd)
+		if err != nil {
+			return err
+		}
+		defer term.Restore(fd, old)
+		t := term.NewTerminal(struct {
+			io.Reader
+			io.Writer
+		}{os.Stdin, os.Stdout}, "> ")
+		c.readLine, out = t.ReadLine, t
+	}
+	return c.run(ctx, addr, os.Stdin, out)
 }
 
 // lookupReflector finds name in an M17Hosts.txt ("NAME ADDRESS PORT" lines).
@@ -98,6 +115,9 @@ type chat struct {
 
 	sess *client.Session
 	term *client.Terminal
+
+	// readLine reads a typed line; nil reads lines from run's input.
+	readLine func() (string, error)
 
 	mu       sync.Mutex
 	out      io.Writer
@@ -151,12 +171,25 @@ func (c *chat) run(ctx context.Context, addr string, in io.Reader, out io.Writer
 	refused := make(chan struct{})
 	go c.read(refused)
 
+	readLine := c.readLine
+	if readLine == nil {
+		sc := bufio.NewScanner(in)
+		readLine = func() (string, error) {
+			if sc.Scan() {
+				return sc.Text(), nil
+			}
+			return "", io.EOF
+		}
+	}
 	lines := make(chan string)
 	go func() {
 		defer close(lines)
-		sc := bufio.NewScanner(in)
-		for sc.Scan() {
-			lines <- sc.Text()
+		for {
+			line, err := readLine()
+			if err != nil {
+				return
+			}
+			lines <- line
 		}
 	}()
 
