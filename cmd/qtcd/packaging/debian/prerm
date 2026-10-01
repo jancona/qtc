@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # prerm for qtcd: stop the service before its files change. On upgrade,
-# postinst starts it again; on removal it is also disabled.
+# postinst starts it again if it is enabled; on removal it is also disabled.
 
 set -e
 

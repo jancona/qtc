@@ -8,7 +8,8 @@
 #     interactive terminal. The node uses the base callsign with module Q.
 #   - upstream: the gateway's current reflector and module, so voice keeps
 #     going where it went before the gateway is pointed at M17-QTC.
-# An existing /etc/qtcd.ini is never touched. A 0.1.0~rc1 /etc/qtcd.json
+# The service is enabled on a first install; an upgrade restarts it only if
+# it is still enabled. An existing /etc/qtcd.ini is never touched. A 0.1.0~rc1 /etc/qtcd.json
 # (the format before INI) is set aside as /etc/qtcd.json.rc1 and a new
 # config is written; the node key in /var/lib/qtcd is kept.
 
@@ -130,9 +131,18 @@ if configured; then
     fi
     echo
     if [ -d /run/systemd/system ]; then
-        systemctl enable qtcd.service
-        systemctl restart qtcd.service
-        echo "qtcd is running."
+        # Enable on a first install only ($2, the previously configured
+        # version, is empty). An upgrade keeps the admin's choice: a
+        # disabled qtcd stays stopped.
+        if [ -z "$2" ]; then
+            systemctl enable qtcd.service
+        fi
+        if systemctl is-enabled --quiet qtcd.service; then
+            systemctl restart qtcd.service
+            echo "qtcd is running."
+        else
+            echo "qtcd is disabled, so it was not started. To run it: sudo systemctl enable --now qtcd"
+        fi
     else
         echo "qtcd is configured; start it with: sudo systemctl enable --now qtcd"
     fi
