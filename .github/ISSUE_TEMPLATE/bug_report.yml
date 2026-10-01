@@ -1,0 +1,53 @@
+name: Problem report
+description: Something in QTC didn't work as expected.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing QTC. Messages are not private, so check anything you paste below for text you'd rather not publish.
+  - type: dropdown
+    id: role
+    attributes:
+      label: How were you using QTC?
+      options:
+        - Running a hotspot with qtcd
+        - Running a public station
+        - From a radio, through a QTC hotspot
+        - qtc chat
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead. Include callsigns, room names, and roughly when (with time zone), so the message can be found in the logs.
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: "Output of `qtcd -version` and `qtc version`, and on a hotspot the m17-gateway version (`dpkg-query -W m17-gateway`)."
+      placeholder: qtcd 0.1.0, m17-gateway 0.6.5
+    validations:
+      required: true
+  - type: input
+    id: radio
+    attributes:
+      label: Radio
+      description: If a radio was involved, its model and firmware version.
+      placeholder: CS7000 with OpenRTX 0.3.x
+  - type: textarea
+    id: status
+    attributes:
+      label: Node status
+      description: "On the hotspot or station, the output of `curl -s localhost:8017/status`."
+      render: json
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: "The relevant part of `journalctl -u qtcd` (and `journalctl -u m17-gateway` if the gateway was involved), from a little before the problem to a little after. For qtc chat, what it printed."
+      render: text

@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Ask on the M17 Project Discord
+    url: https://discord.gg/4brEP8wwVp
+    about: Questions, requests to join the test, and general discussion. Look for N1ADJ.
+  - name: Operator guide
+    url: https://github.com/jancona/qtc/blob/main/docs/operator-guide.md
+    about: Installing and troubleshooting qtcd on a hotspot, including what to collect for a report.
