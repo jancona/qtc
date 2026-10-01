@@ -23,7 +23,7 @@ On a hotspot, qtcd:
 
 ## Requirements
 
-- A Raspberry Pi running Raspberry Pi OS Bookworm or Trixie, 64-bit (`arm64`) or 32-bit (`armhf`), with `m17-gateway` installed. The [M17 hotspot installer](https://github.com/M17-Project/m17-hotspot-installer) sets that up.
+- A Raspberry Pi running Raspberry Pi OS Bookworm or Trixie, 64-bit (`arm64`) or 32-bit (`armhf`), with `m17-gateway` installed. The [M17 hotspot installer](https://github.com/M17-Project/m17-hotspot-installer) sets that up. WPSD and other hotspots built on MMDVMHost and M17Gateway aren't supported: they don't handle M17 packet mode, so they carry voice but not text messages, with or without QTC.
 - An internet connection that allows outgoing TCP.
 - m17-gateway 0.6.2 or later. Run the latest release: it receives and transmits text messages more reliably.
 - On an MMDVM_HS hotspot (MMDVM_HS_Hat, MMDVM_HS_Dual_Hat, or a generic GPIO board), the M17 Project's current modem firmware; see [updating MMDVM_HS firmware](#mmdvm_hs-hotspots-update-the-modem-firmware).
