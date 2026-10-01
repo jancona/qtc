@@ -26,6 +26,7 @@ On a hotspot, qtcd:
 - A Raspberry Pi running Raspberry Pi OS Bookworm or Trixie, 64-bit (`arm64`) or 32-bit (`armhf`), with `m17-gateway` installed. The [M17 hotspot installer](https://github.com/M17-Project/m17-hotspot-installer) sets that up.
 - An internet connection that allows outgoing TCP.
 - m17-gateway 0.6.2 or later. Run the latest release: it receives and transmits text messages more reliably.
+- On an MMDVM_HS hotspot (MMDVM_HS_Hat, MMDVM_HS_Dual_Hat, or a generic GPIO board), the M17 Project's current modem firmware; see [updating MMDVM_HS firmware](#mmdvm_hs-hotspots-update-the-modem-firmware).
 - A correct clock. Messages carry timestamps, and expiry and redelivery depend on them. Raspberry Pi OS keeps time with `systemd-timesyncd` by default; check with `timedatectl`.
 
 ## Installing
@@ -40,7 +41,9 @@ chmod u+x m17-hotspot-installer.sh
 sudo ./m17-hotspot-installer.sh -q
 ```
 
-`-q` installs QTC without asking. Without it, the installer asks near the end. Add `-n` to skip flashing modem firmware on a hotspot that's already set up. The installer is safe to run on an existing hotspot, but it does run a full system upgrade and update the dashboard.
+`-q` installs QTC without asking. Without it, the installer asks near the end. The installer is safe to run on an existing hotspot, but it does run a full system upgrade and update the dashboard.
+
+It also asks `Do you want to flash the latest firmware to the HAT? (Y/n)`. On an MMDVM_HS hotspot, type `y` and choose your board: pressing Enter skips the flash. On a CC1200 or MMDVM repeater board you can type `n`, or add `-n` to the command to skip the question.
 
 The QTC step:
 
@@ -50,12 +53,24 @@ The QTC step:
 
 It doesn't change which reflector your gateway uses. That's the next step: [connecting the gateway](#connecting-the-gateway).
 
+### MMDVM_HS hotspots: update the modem firmware
+
+Earlier MMDVM_HS firmware starts every M17 transmission with three stray bytes, just before the frame that tells a receiver a transmission is starting. Many radios and hotspots then miss the start, and lose the text message. Voice mostly survives, so the problem is easy to miss. The M17 Project's current firmware fixes it.
+
+To check yours, on the hotspot:
+
+```
+journalctl -u m17-gateway | grep "protocol version" | tail -1
+```
+
+The current firmware ends with `GitID #403e47c`. Firmware ending `GitID #8bba4b5`, or anything else, needs updating; the version and date (`v1.6.1 20251011`) are the same on both, so check the GitID. To update, run the hotspot installer as above, answer `y` when it asks to flash the firmware, and choose your board.
+
 ### By hand
 
 Download the `.deb` for your Pi from the [releases page](https://github.com/jancona/qtc/releases). Run `dpkg --print-architecture` to see which one you need: `arm64` or `armhf`. Then:
 
 ```
-sudo apt install ./qtcd_0.1.0.rc4_arm64.deb
+sudo apt install ./qtcd_0.1.0_arm64.deb
 echo "M17-QTC 127.0.0.1 17000" | sudo tee -a /opt/m17/rpi-dashboard/files/OverrideHosts.txt
 ```
 
@@ -250,7 +265,7 @@ The same SDR can measure a radio: transmit analog FM with no audio, and read the
 
 **No `connected to bootstrap peer`.** qtcd can't reach `ham.n1adj.net` on TCP port 4001. Check the Pi's internet connection and any outgoing firewall. qtcd keeps retrying on its own.
 
-**Some text messages arrive and some don't.** The most common cause is a hotspot that's off frequency; see [Getting your hotspot on frequency](#getting-your-hotspot-on-frequency). Radios differ too: some decode a marginal signal better than others.
+**Some text messages arrive and some don't.** The most common causes are a hotspot that's off frequency (see [Getting your hotspot on frequency](#getting-your-hotspot-on-frequency)) and, on an MMDVM_HS hotspot, old modem firmware (see [updating MMDVM_HS firmware](#mmdvm_hs-hotspots-update-the-modem-firmware)). Radios differ too: some decode a marginal signal better than others.
 
 **A radio's messages aren't delivered.** qtcd sends to a radio only if it was heard (transmitted, by voice or SMS) through this hotspot within the last hour. Otherwise it holds messages until the radio is next heard, then sends the 10 most recent, oldest first, with a note saying how many older ones it left out. So a radio that has been listening quietly for over an hour gets its messages when it next keys up. `journalctl -u qtcd | grep -E "holding|replay"` shows this happening. The hour is `[Delivery] ReachWindow`.
 
