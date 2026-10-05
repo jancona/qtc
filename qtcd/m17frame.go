@@ -85,7 +85,10 @@ func parsePacketDatagram(b []byte) (packetFrame, error) {
 	if len(b) < 4+lsfLen+1+2 {
 		return f, fmt.Errorf("packet datagram of %d bytes too short", len(b))
 	}
-	p := m17.NewPacketFromBytes(b[4:])
+	p, err := m17.NewPacketFromBytes(b[4:])
+	if err != nil {
+		return f, err
+	}
 	if !p.LSF.CheckCRC() {
 		return f, fmt.Errorf("packet LSF CRC mismatch")
 	}

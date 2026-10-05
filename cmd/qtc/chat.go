@@ -317,8 +317,8 @@ func (c *chat) receivePacket(b []byte) {
 	if len(b) < 4+m17.LSFLen+3 {
 		return
 	}
-	p := m17.NewPacketFromBytes(b[4:])
-	if !p.LSF.CheckCRC() || !p.CheckCRC() {
+	p, err := m17.NewPacketFromBytes(b[4:])
+	if err != nil || !p.LSF.CheckCRC() || !p.CheckCRC() {
 		return
 	}
 	src := envelope.AddressFromBytes(p.LSF.Src[:])

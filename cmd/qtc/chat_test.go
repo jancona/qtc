@@ -81,11 +81,11 @@ func (n *fakeNode) expect(t *testing.T, magic string) []byte {
 func (n *fakeNode) expectQTC(t *testing.T) (dst, src envelope.Address, e *envelope.Envelope) {
 	t.Helper()
 	b := n.expect(t, m17.MagicM17Packet)
-	p := m17.NewPacketFromBytes(b[4:])
-	if !p.LSF.CheckCRC() || !p.CheckCRC() || byte(p.Type) != byte(envelope.TypeQTC) {
+	p, err := m17.NewPacketFromBytes(b[4:])
+	if err != nil || !p.LSF.CheckCRC() || !p.CheckCRC() || byte(p.Type) != byte(envelope.TypeQTC) {
 		t.Fatalf("bad QTC packet % x", b)
 	}
-	e, err := envelope.Parse(append([]byte{byte(p.Type)}, p.Payload...))
+	e, err = envelope.Parse(append([]byte{byte(p.Type)}, p.Payload...))
 	if err != nil {
 		t.Fatal(err)
 	}

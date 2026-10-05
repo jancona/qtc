@@ -217,7 +217,11 @@ func (r *radio) rxEOT(m17.LSF, uint16, uint16, float64) error            { r.hea
 // possibly after a deliberate drop.
 func (r *radio) rxPacket(lsf m17.LSF, payload []byte, ber float64) error {
 	r.heard()
-	p := m17.NewPacketFromBytes(append(lsf.ToBytes(), payload...))
+	p, err := m17.NewPacketFromBytes(append(lsf.ToBytes(), payload...))
+	if err != nil {
+		r.count(func() { r.counts.other++ })
+		return nil
+	}
 	dst, src := envelope.AddressFromBytes(lsf.Dst[:]), envelope.AddressFromBytes(lsf.Src[:])
 	if byte(p.Type) != byte(envelope.TypeQTC) {
 		r.count(func() { r.counts.other++ })

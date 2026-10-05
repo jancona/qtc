@@ -380,7 +380,10 @@ func withECD(t *testing.T, b []byte, slot1, slot2 envelope.Address) []byte {
 	}
 	switch string(b[:4]) {
 	case magicM17P:
-		p := m17.NewPacketFromBytes(b[4:])
+		p, err := m17.NewPacketFromBytes(b[4:])
+		if err != nil {
+			t.Fatal(err)
+		}
 		p.LSF.SetECD(&s1, p2)
 		p.CalcCRC()
 		return append([]byte(magicM17P), p.ToBytes()...)
