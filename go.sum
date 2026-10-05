@@ -76,8 +76,8 @@ github.com/jackpal/go-nat-pmp v1.0.2 h1:KzKSgb7qkJvOUTqYl9/Hg/me3pWgBmERKrTGD7Bd
 github.com/jackpal/go-nat-pmp v1.0.2/go.mod h1:QPH045xvCAeXUZOxsnwmrtiCoxIr9eob+4orBN1SBKc=
 github.com/jancona/alsa v0.0.0-20260224125037-816157b04153 h1:4cZGdMX7i5n2x3g0NLCoL5K9ePCzH2kQ/iEBo31vC98=
 github.com/jancona/alsa v0.0.0-20260224125037-816157b04153/go.mod h1:552/irjJxsS8Re5H0RzDeTz0UcJdQ3tsVKYSZ9ImAx0=
-github.com/jancona/m17 v0.6.8 h1:f83TtGoYi2vvAKICtnf+MHadHPPHy5hDwxpLazQPbEk=
-github.com/jancona/m17 v0.6.8/go.mod h1:jzbpTrbzsXAEt5eIsehFL3bkWwxSbjnTVOqGhTcPml0=
+github.com/jancona/m17 v0.7.1 h1:v3U1zEVaC1Tx8KOVXs1s02B0arlmDWVbzh2MsnCerwI=
+github.com/jancona/m17 v0.7.1/go.mod h1:jzbpTrbzsXAEt5eIsehFL3bkWwxSbjnTVOqGhTcPml0=
 github.com/jbenet/go-temp-err-catcher v0.1.0 h1:zpb3ZH6wIE8Shj2sKS+khgRvf7T7RABoLk/+KKHggpk=
 github.com/jbenet/go-temp-err-catcher v0.1.0/go.mod h1:0kJRvmDZXNMIiJirNPEYfhpPwbGVtZVWC34vc5WLsDk=
 github.com/jtolds/gls v4.20.0+incompatible h1:xdiiI2gbIgH/gLH7ADydsJ1uDOEzR8yvV7C0MuV77Wo=

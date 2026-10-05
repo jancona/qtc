@@ -90,7 +90,7 @@ func openModem(c radioConfig) (modem.Modem, error) {
 	case "mmdvm":
 		return modem.NewMMDVM(c.rxFrequency, c.txFrequency, float32(c.power), c.frequencyCorr, c.afc, c.modemCfg, c.duplex)
 	case "sx1255":
-		return modem.NewSX1255(c.rxFrequency, c.txFrequency, c.frequencyCorr, c.modemCfg)
+		return modem.NewSX1255(c.rxFrequency, c.txFrequency, c.frequencyCorr, c.modemCfg, c.duplex)
 	}
 	return nil, fmt.Errorf("modem type %q is not cc1200, mmdvm, or sx1255", c.modemType)
 }
