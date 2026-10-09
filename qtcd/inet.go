@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jancona/m17"
 	"github.com/jancona/qtc/envelope"
 )
 
@@ -145,6 +146,16 @@ type inetSession struct {
 	connReq []byte        // the CONN/LSTN as sent upstream, resent until acked
 	connGap time.Duration // wait before the next unanswered CONN; grows to maxConnRetryInterval
 	nextCon time.Time     // when the next CONN may be resent
+
+	// Upstream probe (legacy.go).
+	probe      *m17.Probe // the probe for this upstream link; nil before the first ACKN
+	probeSent  int
+	probeTimer *time.Timer
+	upLegacy   bool                 // the upstream is a legacy reflector
+	upName     *m17.EncodedCallsign // upstream reflector and module; nil if given as host:port
+	// Per-stream legacy decision; only the face's read loop uses these.
+	streamSeen, streamLegacy, streamLogged bool
+	streamID                               uint16
 
 	lastKeepHeard time.Time // internet clients: when keepHeard last heard the callsign
 
@@ -390,7 +401,7 @@ func (f *inetFace) handleClient(b []byte, addr *net.UDPAddr) {
 		if _, src, relayed, ok := streamAddrs(b); ok && s.qtcMode && !relayed {
 			s.heard(src)
 		}
-		s.forwardUp(b)
+		s.forwardStream(b)
 	case magicM17P:
 		s.clientPacket(b)
 	default: // PING, PONG, and anything new
@@ -447,6 +458,7 @@ func (f *inetFace) connect(b []byte, addr *net.UDPAddr) {
 		qtcMode:  mod.Mode == ModeQTC,
 		via:      f.via(addr.IP),
 		up:       up,
+		upName:   upstreamName(mod),
 		last:     time.Now(),
 		heardAt:  map[envelope.Address]time.Time{},
 		nat:      newNativeState(),
@@ -601,6 +613,9 @@ func (s *inetSession) close(disc bool) {
 		return
 	}
 	s.closed = true
+	if s.probeTimer != nil {
+		s.probeTimer.Stop()
+	}
 	s.mu.Unlock()
 	if disc {
 		s.forwardUp(controlDatagram(magicDISC, s.callsign))
@@ -679,7 +694,12 @@ func (s *inetSession) clientPacket(b []byte) {
 	pf, err := parsePacketDatagram(b)
 	if err != nil {
 		s.face.log.Debug("unparseable packet from client; forwarding", "client", s.client, "err", err)
-		s.forwardUp(b)
+		s.forwardPacket(b)
+		return
+	}
+	if m17.IsParrot(encodedCallsign(pf.dst)) {
+		// Not heard: gateways probe PARROT from their own callsign.
+		s.answerParrot(b)
 		return
 	}
 	if s.qtcMode {
@@ -704,10 +724,10 @@ func (s *inetSession) clientPacket(b []byte) {
 			s.face.setNative(pf.src, false)
 			s.ingestSMS(pf)
 		} else {
-			s.forwardUp(b)
+			s.forwardPacket(b)
 		}
 	default:
-		s.forwardUp(b)
+		s.forwardPacket(b)
 	}
 }
 
@@ -951,10 +971,14 @@ func (s *inetSession) readUpstream() {
 			s.mu.Unlock()
 			if first {
 				s.face.log.Info("upstream linked", "client", s.client, "upstream", s.up.RemoteAddr())
+				s.startProbe()
 			}
 			continue // the client was answered when it linked to us
 		case magicNACK:
 			s.face.log.Warn("upstream refused the link; will retry", "client", s.client, "upstream", s.up.RemoteAddr())
+			continue
+		}
+		if string(b[:4]) == magicM17P && s.probeReply(b) {
 			continue
 		}
 		if s.qtcMode && string(b[:4]) == magicM17P {
