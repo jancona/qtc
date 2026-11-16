@@ -23,7 +23,9 @@ On a hotspot, qtcd:
 
 ## Requirements
 
-- A Raspberry Pi running Raspberry Pi OS Bookworm or Trixie, 64-bit (`arm64`) or 32-bit (`armhf`), with `m17-gateway` installed. The [M17 hotspot installer](https://github.com/M17-Project/m17-hotspot-installer) sets that up. WPSD and other hotspots built on MMDVMHost and M17Gateway aren't supported: they don't handle M17 packet mode, so they carry voice but not text messages, with or without QTC.
+- A Raspberry Pi hotspot running either:
+  - `m17-gateway`, on Raspberry Pi OS Bookworm or Trixie, 64-bit (`arm64`) or 32-bit (`armhf`). The [M17 hotspot installer](https://github.com/M17-Project/m17-hotspot-installer) sets that up.
+  - WPSD with the M17 Project's builds of MMDVMHost and M17Gateway, which carry M17 text messages. WPSD support is experimental; see [WPSD hotspots](#wpsd-hotspots-experimental). Pi-Star and other hotspots built on MMDVMHost don't carry text messages, with or without QTC.
 - An internet connection that allows outgoing TCP.
 - m17-gateway 0.6.2 or later. Run the latest release: it receives and transmits text messages more reliably.
 - On an MMDVM_HS hotspot (MMDVM_HS_Hat, MMDVM_HS_Dual_Hat, or a generic GPIO board), the M17 Project's current modem firmware; see [updating MMDVM_HS firmware](#mmdvm_hs-hotspots-update-the-modem-firmware).
@@ -74,6 +76,24 @@ sudo apt install ./qtcd_0.1.0_arm64.deb
 echo "M17-QTC 127.0.0.1 17000" | sudo tee -a /opt/m17/rpi-dashboard/files/OverrideHosts.txt
 ```
 
+### WPSD hotspots (experimental)
+
+The [M17 Project's WPSD builds](https://m17project.org/2026/10/13/m17-wpsd-fork-now-supports-sms/) of MMDVMHost and M17Gateway carry M17 text messages, so QTC works on WPSD too. It has had less testing than `m17-gateway`: in testing so far, an MMDVM_HS hotspot running WPSD received text messages reliably only from a radio close by. If you try it, please report how it goes. Install the `.deb` by hand, as above, but skip the `OverrideHosts.txt` line. The package recognizes WPSD and:
+
+- takes your callsign, and the reflector and module voice goes to, from the M17 Startup Reflector in `/etc/m17gateway`;
+- reads reflector names from `/usr/local/etc/M17Hosts.txt`;
+- adds `M17-QTC 127.0.0.1 17000` to your additions to the hosts list, which you can see in the dashboard under **Advanced → M17 Hosts**, so the gateway can find qtcd. If the line is ever missing, add it there and save.
+
+Then, in the WPSD dashboard's **Configuration**, set **M17 Startup Reflector** to `M17-QTC`, module `A`, and apply. To go back, set it to your old reflector and module.
+
+On an MMDVM_HS hotspot (ADF7021), enable M17 and no other modes. While other modes are enabled, the modem spends part of its time listening for them, and misses the start of short transmissions such as text messages. The MMDVM_HS [firmware](#mmdvm_hs-hotspots-update-the-modem-firmware) needs to be current too. WPSD logs the firmware version in `/var/log/pi-star/MMDVM-*.log`:
+
+```
+grep "protocol version" /var/log/pi-star/MMDVM-*.log | tail -1
+```
+
+The gateway's log is `/var/log/pi-star/M17Gateway-*.log`. qtcd logs to the journal, as on any other hotspot.
+
 ### What the package sets up
 
 On a new install, the package writes `/etc/qtcd.ini` from your gateway's settings:
@@ -82,7 +102,7 @@ On a new install, the package writes `/etc/qtcd.ini` from your gateway's setting
 |---|---|---|
 | Node callsign | your gateway's callsign, base only, with module letter `Q` in the ninth position | gateway `N1ADJ C` → node `N1ADJ   Q` |
 | Upstream for voice | your gateway's current reflector and module | `M17-M17`, module `C` |
-| Hosts file | the dashboard's `M17Hosts.txt` | `/opt/m17/rpi-dashboard/files/M17Hosts.txt` |
+| Hosts file | the dashboard's `M17Hosts.txt` (on WPSD, the gateway's) | `/opt/m17/rpi-dashboard/files/M17Hosts.txt` |
 
 The package then creates the node key, enables and starts the `qtcd` service, and prints the node's peer ID and where voice will go. If the gateway has no callsign yet, and you're installing from a terminal, it asks for one. If you leave it blank, the config keeps its placeholders and qtcd doesn't start until you fill them in (see [configuration](#configuration)).
 
@@ -90,7 +110,7 @@ The package never changes an existing `/etc/qtcd.ini`.
 
 ## Connecting the gateway
 
-In the dashboard, open **Gateway Config** and set:
+On WPSD, see [WPSD hotspots](#wpsd-hotspots-experimental). Otherwise, in the dashboard, open **Gateway Config** and set:
 
 - **Reflector:** `M17-QTC`
 - **Module:** `A`
@@ -257,7 +277,7 @@ The same SDR can measure a radio: transmit analog FM with no audio, and read the
 
 ## Troubleshooting
 
-**The gateway doesn't link to M17-QTC.** Check that `OverrideHosts.txt` has `M17-QTC 127.0.0.1 17000` and the gateway config says `M17-QTC`, module `A`. Look for `client linking` in `journalctl -u qtcd`. If it's missing, the gateway isn't reaching qtcd; `journalctl -u m17-gateway` shows why.
+**The gateway doesn't link to M17-QTC.** Check that `OverrideHosts.txt` has `M17-QTC 127.0.0.1 17000` and the gateway config says `M17-QTC`, module `A`. Look for `client linking` in `journalctl -u qtcd`. If it's missing, the gateway isn't reaching qtcd; `journalctl -u m17-gateway` shows why. On WPSD, check that **Advanced → M17 Hosts** has `M17-QTC 127.0.0.1 17000`; if it doesn't, add it and save.
 
 **The gateway links but voice doesn't reach the reflector.** Look for `upstream linked`. If it never appears, or qtcd logs `upstream silent; relinking`, check that `[Module A] Reflector` is spelled as it appears in `M17Hosts.txt`, and that the reflector is up. `reflector not found in hosts file` means the name isn't in the list, and `no hosts file loaded` means qtcd couldn't read or download the list (the warning before it says why). Until the name resolves, qtcd doesn't answer the gateway (`not answering link`), and it checks again every 15 minutes; the gateway keeps asking and links once it does.
 

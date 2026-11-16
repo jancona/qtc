@@ -4,10 +4,13 @@
 #
 # A new install writes /etc/qtcd.ini from the sample:
 #   - callsign: QTCD_CALLSIGN if set (the hotspot installer passes it), else
-#     the gateway's callsign from /etc/m17-gateway.ini, else a prompt on an
-#     interactive terminal. The node uses the base callsign with module Q.
+#     the gateway's callsign from /etc/m17-gateway.ini (or WPSD's
+#     /etc/m17gateway), else a prompt on an interactive terminal. The node
+#     uses the base callsign with module Q.
 #   - upstream: the gateway's current reflector and module, so voice keeps
 #     going where it went before the gateway is pointed at M17-QTC.
+# On WPSD it also adds M17-QTC to /root/M17Hosts.txt, WPSD's own hosts
+# additions, and to the hosts file the gateway reads.
 # The service is enabled on a first install; an upgrade restarts it only if
 # it is still enabled. An existing /etc/qtcd.ini is never touched. A 0.1.0~rc1 /etc/qtcd.json
 # (the format before INI) is set aside as /etc/qtcd.json.rc1 and a new
@@ -20,6 +23,15 @@ SAMPLE=/usr/share/qtcd/qtcd.ini.sample
 OLD_JSON=/etc/qtcd.json
 STATE=/var/lib/qtcd
 GATEWAY_INI=/etc/m17-gateway.ini
+WPSD_INI=/etc/m17gateway
+WPSD_HOSTS=/usr/local/etc/M17Hosts.txt
+WPSD_OVERRIDES=/root/M17Hosts.txt
+QTC_HOST_LINE="M17-QTC 127.0.0.1 17000"
+
+# WPSD runs MMDVMHost and M17Gateway instead of m17-gateway.
+wpsd() {
+    [ ! -f "$GATEWAY_INI" ] && [ -f "$WPSD_INI" ]
+}
 
 [ "$1" = "configure" ] || exit 0
 
@@ -67,6 +79,17 @@ if [ ! -f "$CONFIG" ]; then
         [ -n "$CALL" ] || CALL="$(ini_value General Callsign "$GATEWAY_INI")"
         REFLECTOR="$(ini_value Reflector Name "$GATEWAY_INI")"
         MODULE="$(ini_value Reflector Module "$GATEWAY_INI")"
+    elif wpsd; then
+        [ -n "$CALL" ] || CALL="$(ini_value General Callsign "$WPSD_INI")"
+        # Startup is the reflector padded with '_' to seven characters,
+        # then '_' and the module, e.g. M17-M17_C; or NONE.
+        STARTUP="$(ini_value Network Startup "$WPSD_INI")"
+        case "$STARTUP" in
+            *_?)
+                MODULE="${STARTUP##*_}"
+                REFLECTOR="$(echo "${STARTUP%_?}" | sed 's/_*$//')"
+                ;;
+        esac
     fi
     [ "$CALL" = "CALLSIGN_PLACEHOLDER" ] && CALL=""
     if [ -z "$CALL" ] && [ -t 0 ]; then
@@ -92,7 +115,7 @@ if [ ! -f "$CONFIG" ]; then
     MODULE="$(echo "${MODULE:-C}" | cut -c1 | tr '[:lower:]' '[:upper:]')"
 
     HOSTS=/opt/m17/rpi-dashboard/files/M17Hosts.txt
-    for h in /opt/m17/rpi-dashboard/files/M17Hosts.txt /opt/m17/m17-gateway/M17Hosts.txt; do
+    for h in /opt/m17/rpi-dashboard/files/M17Hosts.txt /opt/m17/m17-gateway/M17Hosts.txt "$WPSD_HOSTS"; do
         if [ -f "$h" ]; then
             HOSTS="$h"
             break
@@ -118,6 +141,20 @@ if [ ! -f "$CONFIG" ]; then
     if [ ! -f "$HOSTS" ]; then
         echo "qtcd: warning: no M17Hosts.txt found; set [Inet] HostsFile in $CONFIG" >&2
     fi
+fi
+
+# WPSD rebuilds its hosts file from a download plus /root/M17Hosts.txt,
+# its local additions, in wpsd-hostfile-update (hourly, but at most every
+# four hours). The gateway runs as user mmdvm and reads only the rebuilt
+# file, so the line goes in both: /root for future rebuilds, and the rebuilt
+# file so the gateway and dashboard see it now.
+if wpsd; then
+    for f in "$WPSD_OVERRIDES" "$WPSD_HOSTS"; do
+        if [ -d "$(dirname "$f")" ] && ! grep -q '^M17-QTC[[:space:]]' "$f" 2>/dev/null; then
+            echo "$QTC_HOST_LINE" >> "$f"
+            echo "qtcd: added '$QTC_HOST_LINE' to $f"
+        fi
+    done
 fi
 
 if [ -d /run/systemd/system ]; then
@@ -148,8 +185,13 @@ if configured; then
     fi
     UP_REF="$(ini_value "Module A" Reflector "$CONFIG")"
     UP_MOD="$(ini_value "Module A" Module "$CONFIG")"
-    echo "To use QTC, point your gateway at reflector M17-QTC, module A (with"
-    echo "'M17-QTC 127.0.0.1 17000' in its OverrideHosts.txt). Voice then still"
+    if wpsd; then
+        echo "To use QTC, set the M17 Startup Reflector to M17-QTC, module A, in the"
+        echo "WPSD dashboard's Configuration. Voice then still"
+    else
+        echo "To use QTC, point your gateway at reflector M17-QTC, module A (with"
+        echo "'M17-QTC 127.0.0.1 17000' in its OverrideHosts.txt). Voice then still"
+    fi
     echo "goes to ${UP_REF:-the reflector in $CONFIG} module ${UP_MOD:-?}; SMS goes into QTC."
 else
     echo
