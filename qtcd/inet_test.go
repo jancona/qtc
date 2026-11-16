@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"github.com/jancona/m17"
 	"io"
 	"log/slog"
@@ -694,3 +695,22 @@ func TestLoadHostsFile(t *testing.T) {
 }
 
 func writeFile(path, s string) error { return os.WriteFile(path, []byte(s), 0o600) }
+
+// TestStreamAddrsZeroCRC: MMDVMHost and M17Gateway (WPSD) send stream
+// frames with a zero CRC field. Their source must still be read, so a radio
+// keying up through a WPSD hotspot is heard; a wrong nonzero CRC is still
+// rejected. The frame is a capture of a CS7000 key-up through WPSD.
+func TestStreamAddrsZeroCRC(t *testing.T) {
+	b, err := hex.DecodeString("4d31372010f4ffffffffffff0021627692ae0005114a696d202020202020202020200000c09401fe5cedaddfc03001b60a95a1290000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dst, src, rel, ok := streamAddrs(b)
+	if !ok || src != mustAddr(t, "N1ADJ 8") || dst != envelope.Broadcast || rel {
+		t.Errorf("zero-CRC frame: dst %s src %s relayed %v ok %v", dst, src, rel, ok)
+	}
+	b[len(b)-1] = 0x01 // a CRC, and the wrong one
+	if _, _, _, ok := streamAddrs(b); ok {
+		t.Error("accepted a frame with a wrong CRC")
+	}
+}

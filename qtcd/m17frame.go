@@ -1,6 +1,7 @@
 package qtcd
 
 import (
+	"encoding/binary"
 	"fmt"
 
 	"github.com/jancona/m17"
@@ -107,8 +108,14 @@ func parsePacketDatagram(b []byte) (packetFrame, error) {
 }
 
 // streamAddrs reads the destination and source from a stream frame, and
-// whether it was relayed.
+// whether it was relayed. A frame whose CRC field is zero is taken as having
+// none: MMDVMHost and M17Gateway (WPSD) send stream frames that way. A
+// nonzero CRC must still match.
 func streamAddrs(b []byte) (dst, src envelope.Address, isRelayed, ok bool) {
+	if len(b) == streamDgLen && b[streamDgLen-2] == 0 && b[streamDgLen-1] == 0 {
+		b = append([]byte(nil), b...)
+		binary.BigEndian.PutUint16(b[streamDgLen-2:], m17.CRC(b[:streamDgLen-2]))
+	}
 	sd, err := m17.NewStreamDatagramFromBytes(b)
 	if err != nil {
 		return 0, 0, false, false
